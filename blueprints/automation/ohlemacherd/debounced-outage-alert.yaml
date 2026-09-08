@@ -1,0 +1,160 @@
+blueprint:
+  name: Debounced Outage Alert
+  description: >
+    Pages once per real outage instead of once per flip. Written for
+    anything that flaps - a camera stream that stalls for a few minutes and
+    recovers on its own, an integration that drops offline overnight and
+    comes back before anyone's awake to see it - where a plain "notify on
+    state change" automation turns one outage into a stream of "it's down" /
+    "it's back" pushes.
+
+
+    The fix is two small rules: (1) a state has to hold for a confirmation
+    window before it counts as a real outage, not a blip, and (2) once an
+    outage has paged, it doesn't page again until it has actually recovered
+    and gone bad a second time - a dedicated helper remembers whether this
+    outage has already been announced. Recovery itself is deliberately
+    quiet by default: good news doesn't need to buzz a phone, so it's routed
+    to the Logbook/History via a persistent notification unless you turn on
+    push-on-recovery below.
+
+
+    This watches one entity's state, not an arbitrary numeric trend. If what
+    you actually have is a raw number (bytes received, response time, and
+    so on), turn it into a binary/problem sensor first - a Template or
+    Threshold helper, a Statistics/Trend helper - and point this at that.
+  domain: automation
+  author: ohlemacherd
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/debounced-outage-alert.yaml
+  input:
+    health_entity:
+      name: Entity to watch
+      description: >-
+        Any entity whose state tells you whether the thing you care about is
+        up or down - a binary_sensor, a device_tracker, a sensor with a
+        small set of string states, and so on.
+      selector:
+        entity: {}
+    down_state:
+      name: "\"Down\" state"
+      description: >-
+        The state value that means trouble - e.g. off, unavailable,
+        disconnected, closed. Exact match, case-sensitive.
+      default: unavailable
+      selector:
+        text: {}
+    confirm_minutes:
+      name: Minutes before it counts as a real outage
+      description: >-
+        The down state has to hold continuously this long before this
+        automation treats it as a real outage rather than a blip. This is
+        also, in effect, how long the page is delayed.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 240
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    label:
+      name: What to call this in the notification
+      description: 'e.g. "Driveway camera stream", "Weather station uplink".'
+      selector:
+        text: {}
+    paged_flag:
+      name: "\"Already paged\" helper"
+      description: >-
+        A Toggle helper dedicated to this automation (Settings -> Devices &
+        services -> Helpers -> Create helper -> Toggle). Remembers whether
+        the current outage has already been announced, so a flapping entity
+        that keeps re-crossing the down state mid-outage doesn't re-page.
+        Create one helper per instance of this blueprint - don't share one
+        across more than one watched entity.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    notify_service:
+      name: Notify service (down alert)
+      description: e.g. notify.mobile_app_your_phone, or a notify group.
+      selector:
+        text: {}
+    notify_on_recovery:
+      name: Also push a notification on recovery?
+      description: >-
+        Off by default - recovery is logged as a persistent notification
+        (visible in Settings -> Notifications and the Logbook) instead of
+        pushed. Turn this on if you'd rather get a push both ways.
+      default: false
+      selector:
+        boolean: {}
+
+mode: single
+
+variables:
+  health_entity: !input health_entity
+  down_state: !input down_state
+  confirm_minutes: !input confirm_minutes
+  label: !input label
+  paged_flag: !input paged_flag
+  notify_on_recovery: !input notify_on_recovery
+
+triggers:
+  - trigger: state
+    entity_id: !input health_entity
+    to: !input down_state
+    for:
+      minutes: !input confirm_minutes
+    id: down
+  - trigger: state
+    entity_id: !input health_entity
+    id: changed
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: down
+          - condition: state
+            entity_id: !input paged_flag
+            state: "off"
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input paged_flag
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              title: "{{ label }} is down"
+              message: >-
+                {{ label }} has been in state "{{ down_state }}" for
+                {{ confirm_minutes }}+ minutes. You won't hear about this
+                outage again until it recovers.
+      - conditions:
+          - condition: trigger
+            id: changed
+          - condition: template
+            value_template: "{{ states(health_entity) != down_state }}"
+          - condition: state
+            entity_id: !input paged_flag
+            state: "on"
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input paged_flag
+          - if:
+              - condition: template
+                value_template: "{{ notify_on_recovery }}"
+            then:
+              - action: !input notify_service
+                continue_on_error: true
+                data:
+                  title: "{{ label }} recovered"
+                  message: "{{ label }} is back to state \"{{ states(health_entity) }}\"."
+            else:
+              - action: persistent_notification.create
+                data:
+                  title: "{{ label }} recovered"
+                  message: "Back to state \"{{ states(health_entity) }}\" after an outage."
+                  notification_id: "outage_recovered_{{ health_entity }}"
