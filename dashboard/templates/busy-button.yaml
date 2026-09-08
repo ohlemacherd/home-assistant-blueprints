@@ -1,0 +1,60 @@
+# busy_button - a button-card template (https://github.com/custom-cards/button-card)
+#
+# A scene/action tile that SAYS SO while it is still working. Point `entity`
+# at the script the tile calls: a script entity's state is `on` for exactly as
+# long as its sequence runs, so that is the progress signal - no helper, no
+# extra automation. The icon pulses, the border goes amber, and a "Working..."
+# caption appears in a permanently reserved 12px row so the tile never changes
+# height and the grid never jumps mid-tap.
+#
+# Safe on tiles with no `entity:` (a plain light.turn_off tile): every template
+# guards with `entity &&` and falls through to the idle look.
+#
+#   - type: custom:button-card
+#     template: busy_button
+#     entity: script.goodnight            # optional; enables the busy state
+#     name: Goodnight
+#     icon: mdi:weather-night
+#     color: '#58aee2'
+#     tap_action: {action: call-service, service: script.goodnight}
+
+busy_button:
+  show_state: false
+  show_label: false
+  extra_styles: |
+    @keyframes busy-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  custom_fields:
+    busy: |
+      [[[
+        if (!entity || entity.state !== 'on') return '';
+        return `<div style="font-size:9px;letter-spacing:1.3px;text-transform:uppercase;font-weight:700;color:#eab54e;animation:busy-pulse 1.2s ease-in-out infinite">Working…</div>`;
+      ]]]
+  styles:
+    grid:
+    - grid-template-areas: '"i" "n" "busy"'
+    - grid-template-columns: minmax(0, 1fr)
+    # Fixed 12px last row: the caption appears and disappears without ever
+    # resizing the tile.
+    - grid-template-rows: auto auto 12px
+    card:
+    - border-radius: 16px
+    - padding: 16px 8px
+    - min-height: 94px
+    - background: |
+        [[[ return (entity && entity.state === 'on') ? 'rgba(234,181,78,0.10)' : '#1e1b15'; ]]]
+    - border: |
+        [[[ return (entity && entity.state === 'on') ? '1px solid rgba(234,181,78,0.45)' : '1px solid rgba(245,240,230,0.06)'; ]]]
+    icon:
+    - width: 30px
+    - height: 30px
+    - animation: |
+        [[[ return (entity && entity.state === 'on') ? 'busy-pulse 1.2s ease-in-out infinite' : 'none'; ]]]
+    name:
+    - font-size: 13px
+    - font-weight: 600
+    - color: '#f4f0e6'
+    - margin-top: 9px
+    custom_fields:
+      busy:
+      - justify-self: center
+      - align-self: start

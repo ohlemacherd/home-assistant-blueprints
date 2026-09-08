@@ -1,0 +1,127 @@
+# room_tile - a button-card template (https://github.com/custom-cards/button-card)
+#
+# One tile per room: big temperature, colour by delta to a target, and (in the
+# detailed layer) the delta, humidity and the smart vent's average position.
+#
+# Put this under `button_card_templates:` in your dashboard, then:
+#
+#   - type: custom:button-card
+#     template: room_tile
+#     entity: sensor.nursery_temperature          # the room's temperature sensor
+#     variables:
+#       room_name: Nursery
+#       room_icon: mdi:baby-carriage
+#       target_entity: sensor.effective_thermostat_target   # any numeric entity (see this repo's template blueprint)
+#       fallback_target: 70                       # used when target_entity is unavailable
+#       occ_entity: binary_sensor.nursery_occupancy   # optional: green dot when on
+#       hum_entity: sensor.nursery_humidity           # optional
+#       vent_entities: [cover.nursery_vent]           # optional: tilt-position covers (Flair etc.)
+#       follows_main: false                           # true for rooms without a vent
+#
+# The "detailed" layer is on for any viewport under 1000px (phones) and, on
+# wider screens, whenever input_boolean.dashboard_detailed is on. Create that
+# toggle helper or delete the two references to it.
+#
+# Colours: green within 1.5 degrees of target, amber past that, red 3+ warm,
+# blue 3+ cold, grey when the sensor is unavailable. Change the four RGB
+# triples in `colour()` to retheme.
+
+room_tile:
+  show_state: false
+  show_label: false
+  show_name: false
+  show_icon: false
+  tap_action:
+    action: more-info
+  variables:
+    fallback_target: 70
+  custom_fields:
+    chip: |
+      [[[
+        const icon = variables.room_icon || 'mdi:home';
+        const t = parseFloat(entity.state);
+        const te = variables.target_entity ? states[variables.target_entity] : null;
+        const target = (te && !isNaN(parseFloat(te.state))) ? parseFloat(te.state) : variables.fallback_target;
+        const d = t - target;
+        const c = isNaN(t) ? '179,173,159' : d >= 3 ? '233,122,99' : d <= -3 ? '88,174,226' : Math.abs(d) > 1.5 ? '234,181,78' : '116,201,141';
+        return `<div style="width:40px;height:40px;border-radius:12px;background:rgba(${c},0.15);display:flex;align-items:center;justify-content:center"><ha-icon icon="${icon}" style="--mdc-icon-size:22px;width:22px;height:22px;color:rgb(${c})"></ha-icon></div>`;
+      ]]]
+    head: |
+      [[[
+        const name = variables.room_name || '';
+        const o = variables.occ_entity ? states[variables.occ_entity] : null;
+        const on = o && o.state === 'on';
+        const dot = variables.occ_entity ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-left:7px;vertical-align:middle;background:${on?'#74c98d':'transparent'};border:1.5px solid ${on?'#74c98d':'rgba(179,173,159,0.4)'};box-shadow:${on?'0 0 7px 1px rgba(116,201,141,0.55)':'none'}"></span>` : '';
+        return `<div style="font-size:13px;font-weight:600;color:#f4f0e6;text-align:left">${name}${dot}</div>`;
+      ]]]
+    body: |-
+      [[[
+        const t = parseFloat(entity.state);
+        const te = variables.target_entity ? states[variables.target_entity] : null;
+        const target = (te && !isNaN(parseFloat(te.state))) ? parseFloat(te.state) : variables.fallback_target;
+        const d = t - target;
+        const col = isNaN(t) ? '#b3ad9f' : d >= 3 ? '#e97a63' : d <= -3 ? '#58aee2' : Math.abs(d) > 1.5 ? '#eab54e' : '#74c98d';
+        const main = isNaN(t) ? '—' : t.toFixed(1);
+        const detailed = window.matchMedia('(max-width: 999px)').matches || (states['input_boolean.dashboard_detailed'] && states['input_boolean.dashboard_detailed'].state === 'on');
+        let delta = '';
+        if (detailed && !isNaN(t)) {
+          delta = `<span style="font-size:11px;font-weight:700;color:${col};margin-left:6px">${d >= 0 ? '+' : ''}${d.toFixed(1)}°</span>`;
+        }
+        let sub = '';
+        if (detailed && variables.hum_entity) { const h = states[variables.hum_entity]; if (h && !isNaN(parseFloat(h.state))) { const hv = Math.round(parseFloat(h.state)); sub = `<span style="color:${hv>=60?'#eab54e':'#b3ad9f'}">💧 ${hv}%</span>`; } }
+        return `<div style="text-align:left"><span style="font-size:25px;font-weight:800;letter-spacing:-1px;color:${col}">${main}<span style="font-size:13px;font-weight:700">°</span></span>${delta}${sub?` <span style="font-size:11px;margin-left:5px">${sub}</span>`:''}</div>`;
+      ]]]
+    foot: |-
+      [[[
+        const detailed = window.matchMedia('(max-width: 999px)').matches || (states['input_boolean.dashboard_detailed'] && states['input_boolean.dashboard_detailed'].state === 'on');
+        if (!detailed) return '';
+        const te = variables.target_entity ? states[variables.target_entity] : null;
+        const target = (te && !isNaN(parseFloat(te.state))) ? parseFloat(te.state) : variables.fallback_target;
+        if (variables.vent_entities && variables.vent_entities.length) {
+          const vs = variables.vent_entities.map(id => states[id]).filter(Boolean)
+            .map(s => s.attributes.current_tilt_position != null ? s.attributes.current_tilt_position : s.attributes.current_position)
+            .filter(v => v != null && !isNaN(v));
+          if (!vs.length) return `<div style="font-size:10px;color:#8a8578">target ${target}°</div>`;
+          const avg = Math.round(vs.reduce((a,b) => a+b, 0) / vs.length);
+          const vcol = avg <= 55 ? '#58aee2' : '#74c98d';
+          const n = variables.vent_entities.length;
+          return `<div style="display:flex;align-items:center;gap:8px;margin-top:2px">
+            <span style="display:inline-block;width:44px;height:6px;border-radius:3px;background:rgba(150,150,150,0.18);overflow:hidden"><span style="display:block;width:${avg}%;height:100%;border-radius:3px;background:${vcol}"></span></span>
+            <span style="font-size:10px;color:#8a8578">${avg}%${n > 1 ? ' · ' + n + ' vents' : ' vent'} · target ${target}°</span>
+          </div>`;
+        }
+        if (variables.follows_main) {
+          return `<div style="font-size:10px;color:#79746a;margin-top:2px">follows main floor · ${target}°</div>`;
+        }
+        return '';
+      ]]]
+  styles:
+    grid:
+    - grid-template-areas: '"chip head" "chip body" "foot foot"'
+    - grid-template-columns: 52px minmax(0, 1fr)
+    - grid-template-rows: auto auto auto
+    - gap: 2px 12px
+    card:
+    - border-radius: 16px
+    - padding: 14px
+    - min-height: 88px
+    - border: 1px solid rgba(245,240,230,0.06)
+    - background: |
+        [[[
+          const t = parseFloat(entity.state);
+          const te = variables.target_entity ? states[variables.target_entity] : null;
+          const target = (te && !isNaN(parseFloat(te.state))) ? parseFloat(te.state) : variables.fallback_target;
+          const d = t - target;
+          const c = isNaN(t) ? '140,140,140' : d >= 3 ? '233,122,99' : d <= -3 ? '88,174,226' : Math.abs(d) > 1.5 ? '234,181,78' : '116,201,141';
+          return `linear-gradient(135deg, rgba(${c},0.18) 0%, rgba(${c},0.05) 55%, rgba(30,27,21,0) 100%), #1e1b15`;
+        ]]]
+    custom_fields:
+      chip:
+      - align-self: center
+      head:
+      - align-self: end
+      body:
+      - align-self: start
+      foot:
+      - justify-self: start
+      - margin-top: 4px

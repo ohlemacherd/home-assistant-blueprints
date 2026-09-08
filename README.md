@@ -29,6 +29,7 @@ them harmlessly.
 | [Device Watchdog with Optional Auto Power-Cycle](#device-watchdog-with-optional-auto-power-cycle) | Automation | Notices a single point of failure going unreachable and can power-cycle it through a smart plug, with a daily cap. |
 | [Escalating Left-Open Reminder](#escalating-left-open-reminder) | Automation | Three-stage escalating reminder for anything left open/on too long - a door, a pump, an appliance. |
 | [Building an AI daily briefing on top of Home Assistant](docs/ai-briefing-writeup.md) | Write-up (not a blueprint) | The general shape of a scheduled-process + LLM + notify-service daily briefing, and the judgment calls that made it useful. |
+| [Dashboard patterns](docs/dashboard-patterns.md) + two [button-card templates](dashboard/templates/) | Write-up + templates | A room tile (temperature, delta-to-target colour, vent position), a scene tile that shows it's working, and five measured facts about the sections engine. |
 
 ---
 
@@ -317,6 +318,20 @@ Any entity with a "bad" and "ok" state - typically a `binary_sensor`
 | **Stage 1/2/3 delay (minutes)** | Defaults 1 / 5 / 15. |
 | **Notify service** | Where the alerts go. |
 | **Also push a notification when it clears?** | Off by default - clearing just dismisses the banner. |
+
+---
+
+## Dashboard patterns
+
+**Files:** [`docs/dashboard-patterns.md`](docs/dashboard-patterns.md), [`dashboard/templates/room-tile.yaml`](dashboard/templates/room-tile.yaml), [`dashboard/templates/busy-button.yaml`](dashboard/templates/busy-button.yaml)
+
+Not blueprints. Two [button-card](https://github.com/custom-cards/button-card) templates from a
+wall-tablet + phone dashboard - a room tile that reads as a heat map across the room, and a scene
+tile that pulses while its script is still running - plus the platform facts about Lovelace
+`sections` views (no view-level zoom, window-vs-view breakpoints, computed column counts, nested
+`custom_fields` context, and the in-memory YAML cache that a refresh does not bust) that each cost
+an evening to learn. Paste a template under `button_card_templates:` and follow the usage block at
+the top of each file.
 
 ---
 
