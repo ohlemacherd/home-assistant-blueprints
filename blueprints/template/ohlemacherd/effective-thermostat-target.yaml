@@ -1,0 +1,124 @@
+blueprint:
+  name: Effective Thermostat Target (Template Sensor)
+  description: >
+    Creates one sensor: the temperature your thermostat is actually trying to
+    hit right now, as a single plain number, no matter which of its modes
+    (heat, cool, or heat_cool/auto) it happens to be in.
+
+
+    Why this exists: a `climate` entity's target lives in a different
+    attribute depending on its mode - `temperature` in plain heat or cool
+    mode, `target_temp_low` / `target_temp_high` in heat_cool/auto mode - so
+    any automation that wants "the number the thermostat is aiming for"
+    ends up reading the wrong attribute the moment the mode changes, or
+    silently gets nothing back.
+
+
+    This is especially easy to trip over if you also run a smart-vent system
+    (Flair, Keen, and similar) in a manual or non-cloud mode alongside a
+    smart thermostat. Those systems normally compute their own per-room
+    target from occupancy and activity, but putting them in manual mode
+    takes that computation away - the integration marks every room-level
+    entity unavailable by design - so any automation still reading the vent
+    system's own "room target" or "activity" concept quietly breaks. Reading
+    the thermostat directly instead - the one appliance that is always
+    authoritative about what it is trying to do - sidesteps that failure
+    mode entirely, and gives every room automation in the house one place to
+    look instead of six copies of the same mode-branching logic.
+
+
+    Pair this with the "Vent/Register Modulation Against a Target" automation
+    blueprint in this repo: feed this sensor in as its target-temperature
+    input.
+  domain: template
+  author: ohlemacherd
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/template/ohlemacherd/effective-thermostat-target.yaml
+  input:
+    thermostat:
+      name: Thermostat
+      description: The climate entity to read the active target from.
+      selector:
+        entity:
+          filter:
+            - domain: climate
+    sensor_name:
+      name: Sensor name
+      description: >-
+        Name for the resulting sensor. Change this if you use the blueprint
+        more than once (one per thermostat, in a multi-zone home).
+      default: Effective Thermostat Target
+      selector:
+        text: {}
+    heating_action_value:
+      name: '"Actively heating" value'
+      description: >-
+        The value this thermostat's hvac_action attribute uses for "the
+        furnace/heat is running right now" - almost always "heating". Only
+        used to pick a side when the thermostat is in heat_cool/auto mode;
+        ignored in plain heat or cool mode.
+      default: heating
+      selector:
+        text: {}
+    low_clamp:
+      name: Sanity floor
+      description: >-
+        If the computed target ever comes out below this - thermostat
+        unavailable, an attribute missing, a bad reading - the sensor
+        reports the fallback value below instead of a clearly-wrong number.
+      default: 60
+      selector:
+        number:
+          min: 0
+          max: 90
+          step: 1
+          mode: box
+    high_clamp:
+      name: Sanity ceiling
+      default: 80
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          mode: box
+    fallback_value:
+      name: Fallback value
+      description: Reported whenever the computed target fails the sanity check above.
+      default: 70
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          mode: box
+
+trigger:
+  - trigger: state
+    entity_id: !input thermostat
+  - trigger: homeassistant
+    event: start
+
+variables:
+  thermostat: !input thermostat
+  heating_action_value: !input heating_action_value
+  low_clamp: !input low_clamp
+  high_clamp: !input high_clamp
+  fallback_value: !input fallback_value
+
+sensor:
+  - name: !input sensor_name
+    unique_id: effective_thermostat_target
+    unit_of_measurement: "°"
+    icon: mdi:thermometer-check
+    state: >
+      {% set mode = states(thermostat) %}
+      {% if mode in ['unavailable', 'unknown', 'none', ''] %}
+        {{ fallback_value }}
+      {% elif mode == 'heat_cool' %}
+        {% set side = 'target_temp_low' if state_attr(thermostat, 'hvac_action') == heating_action_value else 'target_temp_high' %}
+        {% set t = state_attr(thermostat, side) | float(fallback_value) %}
+        {{ t if low_clamp <= t <= high_clamp else fallback_value }}
+      {% else %}
+        {% set t = state_attr(thermostat, 'temperature') | float(fallback_value) %}
+        {{ t if low_clamp <= t <= high_clamp else fallback_value }}
+      {% endif %}
