@@ -36,6 +36,28 @@ most people can use today; the bottom needs specific hardware.
 | 6 | [Effective Thermostat Target (Template Sensor)](#effective-thermostat-target-template-sensor) | Template sensor | Nobody else has it, but you only need it if a climate entity's mode-dependent target attributes have bitten you. |
 | 7 | [Vent/Register Modulation Against a Target](#ventregister-modulation-against-a-target) | Automation | Unique, but needs smart vents plus a thermostat with hvac_action - the narrowest audience here. |
 
+## What each one needs
+
+**Legend.** *Core* = a built-in Home Assistant integration, no HACS. *HACS* =
+needs the community store. *Cloud* = an external account or API key. *Helpers*
+= things you create once under Settings -> Devices & services -> Helpers.
+*Effort* = Low: 5-10 min, import and pick entities · Medium: ~30 min plus a
+few days of tuning · High: an evening.
+
+| Blueprint | Hardware | Integrations (core) | HACS / add-ons | Cloud / API accounts | Helpers you create | Effort |
+|---|---|---|---|---|---|---|
+| **AI Daily Briefing** | None (a wall tablet or phone to read it on) | **Required:** an **AI Task** entity from any conversation integration - Anthropic, OpenAI, Google Generative AI, Ollama (all core); at least one **calendar** (Google Calendar, CalDAV, Local Calendar…). **Optional:** a `todo` list (Google Tasks, Local To-do, Todoist), the Companion app for push | None | **Required:** the LLM provider's API key - paid per call for the cloud ones, free with local Ollama. **Optional:** a Google account (OAuth) if you use Google Calendar / Google Tasks; a second provider for failover | 0-2 `input_text` (steer line, headline strip) | **Medium** - 20 min to set up, then a week of one-line steers until it reads right |
+| **Smart Plug Charger Cutoff** | A **power-monitoring smart plug** (Kasa/TP-Link EP25, Shelly Plug S, Tasmota, Sonoff POW…) | **Required:** the plug's integration - TP-Link Smart Home, Shelly, Tasmota, ESPHome (all core) | None | Usually none. Newer Kasa firmware asks for your TP-Link/Kasa account email + password once, at pairing | 1 Toggle | **Low** - 10 min; check your charger's watts once |
+| **Debounced Outage Alert** | None | **Required:** any entity whose state means up/down (a camera, a device tracker, a `binary_sensor`); a notify service | None | None | 1 Toggle per watched entity | **Low** - 5 min |
+| **Device Watchdog + Power-Cycle** | **Optional:** a smart plug on the device you want cycled | **Required:** the entities that go unavailable (from the device's own integration - Hue, ZHA, whatever it is); a notify service. **Optional:** the plug's integration | None | None | 1 Toggle; **plus** 1 Counter if you enable auto power-cycle | **Low-Medium** - 15 min; two helpers |
+| **Escalating Left-Open Reminder** | A **contact sensor** (Hue Secure, Aqara, Sonoff, any Zigbee/Z-Wave door sensor) or any binary sensor | **Required:** the sensor's integration (Hue is core; Zigbee via ZHA core or Zigbee2MQTT add-on; Z-Wave JS add-on). The tag / priority / clear-banner features need the **Companion app** notify service | Zigbee2MQTT or Z-Wave JS **add-on** only if that is how your sensor connects | None | None | **Low** - 5 min |
+| **Effective Thermostat Target** (template) | A **smart thermostat** with a `climate` entity (Ecobee, Nest, Honeywell, Z-Wave stats…) | **Required:** the thermostat's integration (Ecobee, Nest, etc. - core) | None | Whatever your thermostat needs - Ecobee and Nest are cloud accounts (Nest needs a Google Device Access project) | None - the blueprint creates the sensor | **Low** - 5 min (Helpers -> Template -> use a blueprint) |
+| **Vent/Register Modulation** | **Smart vents** (Flair, Keen…) with `cover` entities; a room temperature sensor; the thermostat above | **Required:** the thermostat's integration (core); a room temperature sensor of any kind. **Flair** vents: the Flair integration is a **HACS** custom integration; Keen: check HACS too | **HACS** for Flair (and most vent brands) | Flair account (cloud) - and put Flair in Manual mode so it stops writing your thermostat | None (uses the sensor from the template blueprint, or any `input_number`) | **Medium** - 15 min per room, then a week of watching move counts |
+| Dashboard templates (`room-tile`, `busy-button`) | A tablet or phone | A dashboard in YAML mode or the UI editor | **HACS:** [button-card](https://github.com/custom-cards/button-card) (frontend). Optional: card-mod | None | 1 Toggle (`input_boolean.dashboard_detailed`) or delete its two references | **Medium** - an hour to wire your rooms |
+
+Nothing here needs Nabu Casa or any paid subscription except the LLM calls in
+the briefing (pennies a day on the cheap models; zero with a local model).
+
 Also in the repo:
 
 - [Dashboard patterns](docs/dashboard-patterns.md) + two [button-card templates](dashboard/templates/) - a room tile that reads as a heat map, a scene tile that shows it's working, and five measured facts about the sections engine.
