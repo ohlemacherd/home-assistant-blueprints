@@ -20,16 +20,23 @@ them harmlessly.
 
 ## Contents
 
-| Blueprint | Type | What it's for |
-|---|---|---|
-| [Smart Plug Charger Cutoff](#smart-plug-charger-cutoff) | Automation | Turns a smart plug off once whatever's charging on it is actually done. |
-| [Effective Thermostat Target](#effective-thermostat-target-template-sensor) | Template sensor | One sensor: the number your thermostat is actually aiming for, in any mode. |
-| [Vent/Register Modulation Against a Target](#ventregister-modulation-against-a-target) | Automation | Opens/closes a room's smart vents based on that room vs. a target, independent of the vent system's own occupancy logic. |
-| [Debounced Outage Alert](#debounced-outage-alert) | Automation | Pages once per real outage instead of once per flip; recovery is quiet by default. |
-| [Device Watchdog with Optional Auto Power-Cycle](#device-watchdog-with-optional-auto-power-cycle) | Automation | Notices a single point of failure going unreachable and can power-cycle it through a smart plug, with a daily cap. |
-| [Escalating Left-Open Reminder](#escalating-left-open-reminder) | Automation | Three-stage escalating reminder for anything left open/on too long - a door, a pump, an appliance. |
-| [Building an AI daily briefing on top of Home Assistant](docs/ai-briefing-writeup.md) | Write-up (not a blueprint) | The general shape of a scheduled-process + LLM + notify-service daily briefing, and the judgment calls that made it useful. |
-| [Dashboard patterns](docs/dashboard-patterns.md) + two [button-card templates](dashboard/templates/) | Write-up + templates | A room tile (temperature, delta-to-target colour, vent position), a scene tile that shows it's working, and five measured facts about the sections engine. |
+Ordered by how helpful and how unusual each one is - the top of the list is what
+most people can use today; the bottom needs specific hardware.
+
+| # | Blueprint | Type | Why it's here |
+|---|---|---|---|
+| 1 | [Smart Plug Charger Cutoff](#smart-plug-charger-cutoff) | Automation | Broadest audience and the least obvious logic: a charging-session flag instead of a kWh guess. Any power-monitoring plug. |
+| 2 | [Debounced Outage Alert](#debounced-outage-alert) | Automation | Everyone has something that flaps. One page per real outage, quiet recovery. No hardware at all. |
+| 3 | [Device Watchdog with Optional Auto Power-Cycle](#device-watchdog-with-optional-auto-power-cycle) | Automation | The 'pull the plug and put it back' fix, automated - with a daily cap so a dead device can't loop. Any smart plug. |
+| 4 | [Escalating Left-Open Reminder](#escalating-left-open-reminder) | Automation | Common need, but the 1/5/15 escalation with one replacing banner is what makes it usable. Any contact sensor. |
+| 5 | [Effective Thermostat Target (Template Sensor)](#effective-thermostat-target-template-sensor) | Template sensor | Nobody else has it, but you only need it if a climate entity's mode-dependent target attributes have bitten you. |
+| 6 | [Vent/Register Modulation Against a Target](#ventregister-modulation-against-a-target) | Automation | Unique, but needs smart vents plus a thermostat with hvac_action - the narrowest audience here. |
+
+Also in the repo, not blueprints:
+
+- [More ideas, by the hardware they need](docs/ideas-by-hardware.md) - everything else that runs in the same house, grouped by the device it depends on, so you can see what a purchase would unlock (or steal the idea for hardware you already have).
+- [Dashboard patterns](docs/dashboard-patterns.md) + two [button-card templates](dashboard/templates/) - a room tile that reads as a heat map, a scene tile that shows it's working, and five measured facts about the sections engine.
+- [Building an AI daily briefing on top of Home Assistant](docs/ai-briefing-writeup.md) - the shape of a scheduled-process + LLM + notify-service briefing and the judgment calls that made it useful.
 
 ---
 
@@ -92,100 +99,6 @@ charge from empty.
 | **Turn the plug back on automatically?** | Off by default - the plug just stays off until switched back on by hand (or its own button). Turn on to enable the daily restore time below. |
 | **Daily restore time** | Only used if the above is enabled. Default 06:00. Harmless to fire with nothing plugged in. A charger still on a full battery just floats after the restore (it never re-arms the session flag) - one day of float is fine, which is the whole point of not leaving it for a week. |
 | **Notify service** | Which `notify.*` service to call when the plug switches off, e.g. `notify.mobile_app_your_phone`, or a notify group. Defaults to `notify.persistent_notification` (built in; shows under Settings -> Notifications, no push required). |
-
----
-
-## Effective Thermostat Target (Template Sensor)
-
-[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Ftemplate%2Fohlemacherd%2Feffective-thermostat-target.yaml)
-
-**File:** [`blueprints/template/ohlemacherd/effective-thermostat-target.yaml`](blueprints/template/ohlemacherd/effective-thermostat-target.yaml)
-
-Creates one sensor: the temperature your thermostat is actually trying to
-hit right now, as a single number, no matter which of its modes (heat,
-cool, or heat_cool/auto) it happens to be in.
-
-### Why this exists
-
-A `climate` entity's target lives in a different attribute depending on its
-mode - `temperature` in plain heat or cool mode, `target_temp_low` /
-`target_temp_high` in heat_cool/auto mode - so any automation reading "the
-number the thermostat is aiming for" ends up reading the wrong attribute
-the moment the mode changes.
-
-This is especially easy to trip over if you also run a smart-vent system
-(Flair, Keen, and similar) in a manual or non-cloud mode alongside a smart
-thermostat. Those systems normally compute their own per-room target from
-occupancy and activity - but a manual mode takes that computation away and
-marks every room-level entity unavailable by design, so any automation
-still reading the vent system's own "room target" concept quietly breaks.
-Reading the thermostat directly - the one appliance that's always
-authoritative about what it's trying to do - sidesteps that failure mode
-and gives every room automation in the house one place to look.
-
-Pair it with **Vent/Register Modulation Against a Target** below.
-
-### What you need before importing
-
-Just a `climate` entity. This is a **Template helper**, not an automation:
-**Settings -> Devices & services -> Helpers -> Create helper -> Template ->
-Template a sensor**, then choose "use a blueprint."
-
-### Inputs, in plain language
-
-| Input | What it is |
-|---|---|
-| **Thermostat** | The climate entity to read the active target from. |
-| **Sensor name** | Name for the resulting sensor. Change it if you use this blueprint more than once (multi-zone home). |
-| **"Actively heating" value** | The hvac_action value meaning "furnace is running" - almost always `heating`. Only matters in heat_cool/auto mode. |
-| **Temperature unit** | A label for the sensor - °F or °C. |
-| **Sanity floor / ceiling** | If the computed target ever comes out outside this range, the fallback value is reported instead. Defaults 60-80 (Fahrenheit - Celsius users set roughly 15 / 30). |
-| **Fallback value** | Reported when the computed target fails the sanity check. Default 70 (Celsius: 21). |
-
----
-
-## Vent/Register Modulation Against a Target
-
-[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fvent-modulation-to-target.yaml)
-
-**File:** [`blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml`](blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml)
-
-Opens a room's smart vents/registers when the house's active heating or
-cooling would actually help that room, and closes them once the room is
-within a hysteresis band of its target. Does nothing while the system is
-idle - a vent stays exactly where it last was rather than being forced open
-or shut for no reason.
-
-Written for anyone running smart vents (Flair, Keen, or similar) in a
-manual/non-cloud mode alongside a smart thermostat. This automation only
-needs a room temperature sensor, a numeric target, and the thermostat's own
-`hvac_action` - it never touches the vent system's own occupancy or
-activity concepts, so it keeps working the same whether the vent system is
-in its normal cloud mode or a fully manual one.
-
-### What you need before importing
-
-- A `climate` entity for the thermostat driving the system.
-- A numeric target-temperature sensor for this room - the **Effective
-  Thermostat Target** blueprint above works well here, or any numeric
-  sensor/`input_number`.
-- This room's own temperature sensor.
-- One or more `cover` entities controlling this room's vents.
-- One instance of this blueprint per room.
-
-### Inputs, in plain language
-
-| Input | What it is |
-|---|---|
-| **Thermostat** | Drives the direction (heating/cooling/idle) via its hvac_action attribute. |
-| **Target temperature sensor** | What this room should be at. |
-| **Room temperature sensor** | What this room actually is. |
-| **Vents/registers** | The cover entities to move. |
-| **Position type** | Plain position or tilt position - matches your specific vent hardware. |
-| **Open value / Closed value** | The position numbers meaning fully open/closed. Defaults 100/0. |
-| **Hysteresis (degrees)** | How far past target, in the helpful direction, before the vent opens. Default 1°. |
-| **Skip when already in position?** | On by default: don't re-send a position the vents already report, so a cloud vent isn't commanded every few minutes. Turn off only if your vents report position unreliably. |
-| **Settle time (minutes)** | A short debounce on the room-sensor trigger only, so one noisy reading doesn't flip the vent. Default 2. |
 
 ---
 
@@ -318,6 +231,100 @@ Any entity with a "bad" and "ok" state - typically a `binary_sensor`
 | **Stage 1/2/3 delay (minutes)** | Defaults 1 / 5 / 15. |
 | **Notify service** | Where the alerts go. |
 | **Also push a notification when it clears?** | Off by default - clearing just dismisses the banner. |
+
+---
+
+## Effective Thermostat Target (Template Sensor)
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Ftemplate%2Fohlemacherd%2Feffective-thermostat-target.yaml)
+
+**File:** [`blueprints/template/ohlemacherd/effective-thermostat-target.yaml`](blueprints/template/ohlemacherd/effective-thermostat-target.yaml)
+
+Creates one sensor: the temperature your thermostat is actually trying to
+hit right now, as a single number, no matter which of its modes (heat,
+cool, or heat_cool/auto) it happens to be in.
+
+### Why this exists
+
+A `climate` entity's target lives in a different attribute depending on its
+mode - `temperature` in plain heat or cool mode, `target_temp_low` /
+`target_temp_high` in heat_cool/auto mode - so any automation reading "the
+number the thermostat is aiming for" ends up reading the wrong attribute
+the moment the mode changes.
+
+This is especially easy to trip over if you also run a smart-vent system
+(Flair, Keen, and similar) in a manual or non-cloud mode alongside a smart
+thermostat. Those systems normally compute their own per-room target from
+occupancy and activity - but a manual mode takes that computation away and
+marks every room-level entity unavailable by design, so any automation
+still reading the vent system's own "room target" concept quietly breaks.
+Reading the thermostat directly - the one appliance that's always
+authoritative about what it's trying to do - sidesteps that failure mode
+and gives every room automation in the house one place to look.
+
+Pair it with **Vent/Register Modulation Against a Target** below.
+
+### What you need before importing
+
+Just a `climate` entity. This is a **Template helper**, not an automation:
+**Settings -> Devices & services -> Helpers -> Create helper -> Template ->
+Template a sensor**, then choose "use a blueprint."
+
+### Inputs, in plain language
+
+| Input | What it is |
+|---|---|
+| **Thermostat** | The climate entity to read the active target from. |
+| **Sensor name** | Name for the resulting sensor. Change it if you use this blueprint more than once (multi-zone home). |
+| **"Actively heating" value** | The hvac_action value meaning "furnace is running" - almost always `heating`. Only matters in heat_cool/auto mode. |
+| **Temperature unit** | A label for the sensor - °F or °C. |
+| **Sanity floor / ceiling** | If the computed target ever comes out outside this range, the fallback value is reported instead. Defaults 60-80 (Fahrenheit - Celsius users set roughly 15 / 30). |
+| **Fallback value** | Reported when the computed target fails the sanity check. Default 70 (Celsius: 21). |
+
+---
+
+## Vent/Register Modulation Against a Target
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fvent-modulation-to-target.yaml)
+
+**File:** [`blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml`](blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml)
+
+Opens a room's smart vents/registers when the house's active heating or
+cooling would actually help that room, and closes them once the room is
+within a hysteresis band of its target. Does nothing while the system is
+idle - a vent stays exactly where it last was rather than being forced open
+or shut for no reason.
+
+Written for anyone running smart vents (Flair, Keen, or similar) in a
+manual/non-cloud mode alongside a smart thermostat. This automation only
+needs a room temperature sensor, a numeric target, and the thermostat's own
+`hvac_action` - it never touches the vent system's own occupancy or
+activity concepts, so it keeps working the same whether the vent system is
+in its normal cloud mode or a fully manual one.
+
+### What you need before importing
+
+- A `climate` entity for the thermostat driving the system.
+- A numeric target-temperature sensor for this room - the **Effective
+  Thermostat Target** blueprint above works well here, or any numeric
+  sensor/`input_number`.
+- This room's own temperature sensor.
+- One or more `cover` entities controlling this room's vents.
+- One instance of this blueprint per room.
+
+### Inputs, in plain language
+
+| Input | What it is |
+|---|---|
+| **Thermostat** | Drives the direction (heating/cooling/idle) via its hvac_action attribute. |
+| **Target temperature sensor** | What this room should be at. |
+| **Room temperature sensor** | What this room actually is. |
+| **Vents/registers** | The cover entities to move. |
+| **Position type** | Plain position or tilt position - matches your specific vent hardware. |
+| **Open value / Closed value** | The position numbers meaning fully open/closed. Defaults 100/0. |
+| **Hysteresis (degrees)** | How far past target, in the helpful direction, before the vent opens. Default 1°. |
+| **Skip when already in position?** | On by default: don't re-send a position the vents already report, so a cloud vent isn't commanded every few minutes. Turn off only if your vents report position unreliably. |
+| **Settle time (minutes)** | A short debounce on the room-sensor trigger only, so one noisy reading doesn't flip the vent. Default 2. |
 
 ---
 
