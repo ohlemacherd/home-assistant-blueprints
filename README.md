@@ -1,8 +1,11 @@
 # Home Assistant Blueprints
 
-A small collection of Home Assistant automation and template blueprints,
-plus one write-up. This is a hobby side-project, not a supported product -
-see "Honest expectations" below.
+One house's second brain, taken apart into pieces you can import. The
+centre of it is a daily AI briefing that makes the small decisions - what
+matters today, what can wait, what needs a nudge before an event - so the
+people in the house don't spend attention on them. Around it: the
+automations that fell out of building that house, generalized. A hobby
+side-project, not a supported product - see "Honest expectations" below.
 
 ## Importing
 
@@ -25,18 +28,74 @@ most people can use today; the bottom needs specific hardware.
 
 | # | Blueprint | Type | Why it's here |
 |---|---|---|---|
-| 1 | [Smart Plug Charger Cutoff](#smart-plug-charger-cutoff) | Automation | Broadest audience and the least obvious logic: a charging-session flag instead of a kWh guess. Any power-monitoring plug. |
-| 2 | [Debounced Outage Alert](#debounced-outage-alert) | Automation | Everyone has something that flaps. One page per real outage, quiet recovery. No hardware at all. |
-| 3 | [Device Watchdog with Optional Auto Power-Cycle](#device-watchdog-with-optional-auto-power-cycle) | Automation | The 'pull the plug and put it back' fix, automated - with a daily cap so a dead device can't loop. Any smart plug. |
-| 4 | [Escalating Left-Open Reminder](#escalating-left-open-reminder) | Automation | Common need, but the 1/5/15 escalation with one replacing banner is what makes it usable. Any contact sensor. |
-| 5 | [Effective Thermostat Target (Template Sensor)](#effective-thermostat-target-template-sensor) | Template sensor | Nobody else has it, but you only need it if a climate entity's mode-dependent target attributes have bitten you. |
-| 6 | [Vent/Register Modulation Against a Target](#ventregister-modulation-against-a-target) | Automation | Unique, but needs smart vents plus a thermostat with hvac_action - the narrowest audience here. |
+| 1 | [AI Daily Briefing (a second brain, one paragraph a day)](#ai-daily-briefing-a-second-brain-one-paragraph-a-day) | Automation | The centrepiece. Calendars + to-dos + home state → one AI call under standing judgment rules → a headline, a paragraph, a few bullets. Any provider with an AI Task entity; optional failover; a one-line steer the reader can type. |
+| 2 | [Smart Plug Charger Cutoff](#smart-plug-charger-cutoff) | Automation | Broadest audience and the least obvious logic: a charging-session flag instead of a kWh guess. Any power-monitoring plug. |
+| 3 | [Debounced Outage Alert](#debounced-outage-alert) | Automation | Everyone has something that flaps. One page per real outage, quiet recovery. No hardware at all. |
+| 4 | [Device Watchdog with Optional Auto Power-Cycle](#device-watchdog-with-optional-auto-power-cycle) | Automation | The 'pull the plug and put it back' fix, automated - with a daily cap so a dead device can't loop. Any smart plug. |
+| 5 | [Escalating Left-Open Reminder](#escalating-left-open-reminder) | Automation | Common need, but the 1/5/15 escalation with one replacing banner is what makes it usable. Any contact sensor. |
+| 6 | [Effective Thermostat Target (Template Sensor)](#effective-thermostat-target-template-sensor) | Template sensor | Nobody else has it, but you only need it if a climate entity's mode-dependent target attributes have bitten you. |
+| 7 | [Vent/Register Modulation Against a Target](#ventregister-modulation-against-a-target) | Automation | Unique, but needs smart vents plus a thermostat with hvac_action - the narrowest audience here. |
 
 Also in the repo, not blueprints:
 
 - [More ideas, by the hardware they need](docs/ideas-by-hardware.md) - everything else that runs in the same house, grouped by the device it depends on, so you can see what a purchase would unlock (or steal the idea for hardware you already have).
+- [The HVAC engine](docs/hvac-engine.md) - one thermostat, six smart vents, ~30 automations in seven layers, and the lessons (the 212°F sensor morning, the guard that called its own write "manual", the pull chain software can't see).
 - [Dashboard patterns](docs/dashboard-patterns.md) + two [button-card templates](dashboard/templates/) - a room tile that reads as a heat map, a scene tile that shows it's working, and five measured facts about the sections engine.
 - [Building an AI daily briefing on top of Home Assistant](docs/ai-briefing-writeup.md) - the shape of a scheduled-process + LLM + notify-service briefing and the judgment calls that made it useful.
+
+---
+
+## AI Daily Briefing (a second brain, one paragraph a day)
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fai-daily-briefing.yaml)
+
+**File:** [`blueprints/automation/ohlemacherd/ai-daily-briefing.yaml`](blueprints/automation/ohlemacherd/ai-daily-briefing.yaml)
+
+Once a day (or twice), gathers what the house actually knows - the calendars
+the household can act on, a to-do list (dated items only), any sensor states
+you name - and hands it to an AI Task entity with a short set of judgment
+rules. Back comes a briefing shaped like a person wrote it: one headline, two
+to four sentences of judgment, a few noun-first bullets for today, a short
+radar for the weeks ahead. Delivered wherever you point it; the headline can
+also land in an `input_text` for a dashboard strip, and the whole thing fires
+as an event for anything else to pick up.
+
+### Why this is the one that matters
+
+A day is mostly micro-decisions. Is today's schedule tight? Does anything need
+buying before Saturday? Is it worth mentioning that the guest room is cold?
+This makes those calls once, first thing, so nobody in the house has to. The
+rules that stop it turning into a status report are the product, and they are
+an input: *mention something only if it would change what the reader does
+today; noun-first, never commands, never guilt; never health or money; a
+quiet day is allowed to be quiet.* The one-line **steer** helper is the
+feedback loop - "stop mentioning the trash", "lead with the kids' schedule" -
+and it's what makes the thing feel like it learns. The longer write-up is
+[here](docs/ai-briefing-writeup.md), including what the full second brain
+does beyond this blueprint.
+
+### What you need before importing
+
+- An **AI Task entity** from any provider integration that offers one
+  (Anthropic, OpenAI, Google Generative AI, Ollama, ...). A second one from a
+  different provider is optional and gives you a failover.
+- Calendars in Home Assistant - only the ones the household can act on.
+- Optional: a `todo` list, an `input_text` for the steer line, an
+  `input_text` for the headline.
+
+### Inputs, in plain language
+
+| Input | What it is |
+|---|---|
+| **AI Task entity** / **Fallback** | Who writes it; who writes it when the first one is out of credits. |
+| **Briefing time** / **second run** | Morning by default; an optional evening run previews tomorrow. Fire the event `ai_daily_briefing_refresh` for an on-demand run. |
+| **Calendars** / **look-ahead days** | Today and tomorrow are always separated out; the look-ahead feeds the radar (default 14 days). |
+| **To-do list** | Dated items only, soonest first, capped at eight. |
+| **Home state to include** | Sensors whose state is a fact worth knowing today - weather, who's home, a low-stock counter, the thermostat. |
+| **Who this is for** / **Standing rules** | The audience line and the judgment rules. Keep rules as abstract shapes, never example sentences - a vivid example becomes a template the model repeats on days it isn't true. |
+| **Steer helper** | The reader's one-line correction; it overrides the rules for the next run. |
+| **Notify service** | Default `notify.persistent_notification` - routine content deserves a persistent, low-key home, not a push. |
+| **Headline helper** / **max bullets** | For a dashboard strip; cap on today's bullets. |
 
 ---
 

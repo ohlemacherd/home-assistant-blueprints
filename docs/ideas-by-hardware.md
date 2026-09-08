@@ -7,6 +7,41 @@ it - or steal the idea for hardware you already have. None of these are
 blueprints (yet); where one is, it's linked. Ask in an issue if you want one
 turned into a blueprint and I'll see whether it survives generalizing.
 
+## The big engines (each one is many automations)
+
+Before the hardware list: five systems in this house are not one automation
+but an engine with a dozen or more parts, a timeline, and a year of lessons.
+Any of them would take a weekend to rebuild from the description; the
+description is what makes the weekend possible.
+
+1. **The second brain** - the [AI Daily Briefing](../blueprints/automation/ohlemacherd/ai-daily-briefing.yaml)
+   blueprint is its core; the [write-up](ai-briefing-writeup.md) covers the
+   ledger of open decisions, the triage relay, steers that graduate into
+   standing rules, the deterministic fallback, and the AI-call counters.
+2. **The HVAC engine** - one thermostat, six smart vents, ~30 automations in
+   seven layers (kill switch + hold, safety, vents, forecast modes, the
+   evening ladder, hour-aware guards, hold discipline + furnace lockout),
+   built against one rule: nobody in the house may ever feel the automation
+   revert something they chose. [Full write-up](hvac-engine.md).
+3. **The kitchen engine** - a meal planner's dinner calendar feeds the
+   briefing and a wall-tablet dinner picker ("Pick from the week" / "Cook
+   what we have", the second one an LLM call over the pantry inventory);
+   a grocery inventory app tracks stock, low-stock counters reach the
+   briefing, a consume loop decrements what got cooked, and chores tick
+   themselves when the vacuum finishes a floor. Hardware: a tablet and a
+   robot vacuum; the rest is software (Mealie, Grocy).
+4. **Camera intelligence** - go2rtc in front of the cameras, warm frames for
+   the outdoor streams, a vision model asked one question per event
+   (person at the door, package at dusk, patio before rain), per-camera
+   cooldowns, a stream-health watcher with once-per-outage paging, and a
+   hard rule about only asking a camera about what it renders large.
+5. **The door and safety layer** - contact sensors on every exterior door
+   feeding a chirp on the speakers, three-stage escalating reminders, a
+   gentle single reminder for the door that's open on purpose, a night
+   alert, a toddler-safety chime ladder on the basement door, and sump-pump
+   / fridge-door alerts from the energy monitor. Every sound means one
+   thing and is never reused.
+
 ## No special hardware
 
 - **Cloud health sensor: "is it the internet, or the house?"** One template

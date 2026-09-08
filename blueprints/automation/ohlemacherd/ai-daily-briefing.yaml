@@ -1,0 +1,423 @@
+blueprint:
+  name: AI Daily Briefing (a second brain, one paragraph a day)
+  description: >
+    Once a day (or twice), gathers what your house actually knows - calendars,
+    a to-do list, any sensor states you name - hands it to an AI Task entity
+    with a short set of judgment rules, and delivers a briefing shaped like a
+    person wrote it: one headline, two to four sentences of judgment, a few
+    noun-first bullets for today, a short radar for the weeks ahead. Works
+    with any provider that exposes an AI Task entity in Home Assistant
+    (Anthropic, OpenAI, Google, Ollama, ...), with an optional second entity
+    as a failover.
+
+
+    This is the core of a "second brain": in a day full of micro-decisions,
+    the briefing makes the small ones - what matters today, what can wait,
+    what needs a nudge before an event - so you don't spend attention on
+    them. The rules that keep it from turning into a status report are the
+    whole product, and they are inputs below so you can tune them. Defaults:
+    mention a thing only if it would change what the reader does today; noun-
+    first, never commands; never guilt, never medical, never money; silence
+    is a valid output on a quiet day.
+
+
+    A one-line "steer" helper lets the reader correct the next run ("stop
+    mentioning the trash", "lead with the kids' schedule") without editing a
+    prompt - that single feedback loop is what makes it feel like it learns.
+  domain: automation
+  author: ohlemacherd
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/ai-daily-briefing.yaml
+  input:
+    ai_task:
+      name: AI Task entity
+      description: >-
+        The AI Task entity that writes the briefing (Settings -> Devices &
+        services -> your AI integration -> AI Task). Any provider works.
+      selector:
+        entity:
+          filter:
+            - domain: ai_task
+    fallback_ai_task:
+      name: Fallback AI Task entity (optional)
+      description: >-
+        A second provider to try when the first returns nothing - out of
+        credits, an outage. An unavailable provider does NOT make its entity
+        unavailable; the call just fails, which is why this is a retry and not
+        a state check. Leave empty for no failover.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: ai_task
+    briefing_time:
+      name: Briefing time
+      default: "06:30:00"
+      selector:
+        time: {}
+    enable_second:
+      name: Run a second time each day?
+      default: false
+      selector:
+        boolean: {}
+    second_time:
+      name: Second run time
+      description: Only used when the option above is on. An evening run previews tomorrow.
+      default: "18:00:00"
+      selector:
+        time: {}
+    calendars:
+      name: Calendars
+      description: >-
+        The calendars the household can ACT on - family, work-affecting,
+        school, the dinner plan. Not news feeds: a feed turns a briefing into
+        something you skim.
+      default: []
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: calendar
+    lookahead_days:
+      name: Calendar look-ahead (days)
+      description: >-
+        How far ahead to read for the "look ahead" radar (birthdays,
+        events that need prep). Today and tomorrow are always separated out.
+      default: 14
+      selector:
+        number:
+          min: 2
+          max: 90
+          step: 1
+          unit_of_measurement: days
+          mode: box
+    todo_list:
+      name: To-do list (optional)
+      description: >-
+        A todo entity. Only items with a due date are used, soonest first,
+        capped at eight - an undated list is a wish list, not a plan.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: todo
+    state_entities:
+      name: Home state to include (optional)
+      description: >-
+        Sensors and helpers whose current state is a fact worth knowing today:
+        weather, who is home, low-stock counters, a dinner-plan helper, the
+        thermostat. Each becomes one line of "name: state" in the facts.
+      default: []
+      selector:
+        entity:
+          multiple: true
+    audience:
+      name: Who this is for
+      description: One line the model addresses the briefing to.
+      default: a two-adult household reading this on a kitchen tablet and their phones
+      selector:
+        text: {}
+    rules:
+      name: Standing rules (the judgment calls)
+      description: >-
+        These are the product. Edit freely; keep them as abstract shapes, not
+        example sentences - a vivid example becomes a template the model
+        repeats on days it isn't true.
+      default: >-
+        Mention something only if knowing it would change what the reader does today; everything else is noise, even if true.
+        Noun-first phrasing, never commands, never guilt.
+        Never mention health, medical or money matters even if they appear in the inputs.
+        Package or delivery arrivals are never worth a line.
+        A quiet day is fine: say so briefly or say nothing rather than manufacture significance.
+        Never assert a status the inputs do not state (a booking, a confirmation, a decision).
+        The look-ahead is one nudge that ties a task to the event it serves, with days-out; not a list of everything.
+      selector:
+        text:
+          multiline: true
+    steer_helper:
+      name: Steer helper (optional)
+      description: >-
+        An input_text the reader can type one line into ("lead with the kids'
+        schedule", "stop mentioning the trash"). Its current value is handed
+        to the model as the reader's latest correction and takes precedence
+        over the rules above. Clear it when the steer has stuck.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+    notify_service:
+      name: Notify service
+      description: >-
+        Where the briefing goes. notify.persistent_notification (the default)
+        is built in and shows under Settings -> Notifications - a persistent,
+        low-key home is the right default for routine content; use a mobile
+        push only if you really want to be interrupted by it.
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    headline_helper:
+      name: Headline helper (optional)
+      description: >-
+        An input_text that receives the headline (<= 90 chars) each run, for a
+        dashboard strip. The full briefing is also fired as the event
+        `ai_daily_briefing` (data: headline, briefing, today, look_ahead,
+        daypart, backend) so a trigger-based template sensor can hold the
+        long text - input_text is capped at 255 characters.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+    max_bullets:
+      name: Max bullets for today
+      default: 6
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 1
+          mode: box
+
+mode: single
+
+variables:
+  ai_task: !input ai_task
+  fallback_ai_task: !input fallback_ai_task
+  enable_second: !input enable_second
+  calendars: !input calendars
+  lookahead_days: !input lookahead_days
+  todo_list: !input todo_list
+  state_entities: !input state_entities
+  audience: !input audience
+  rules: !input rules
+  steer_helper: !input steer_helper
+  notify_service: !input notify_service
+  headline_helper: !input headline_helper
+  max_bullets: !input max_bullets
+
+triggers:
+  - trigger: time
+    at: !input briefing_time
+    id: main
+  - trigger: time
+    at: !input second_time
+    id: second
+  # Fire this event from a button or another automation for an on-demand run.
+  - trigger: event
+    event_type: ai_daily_briefing_refresh
+    id: refresh
+
+conditions:
+  - condition: template
+    value_template: "{{ trigger.id != 'second' or enable_second }}"
+
+actions:
+  # ---- gather: each source is continue_on_error so one dead source never
+  # blanks the briefing.
+  - if:
+      - condition: template
+        value_template: "{{ calendars | count > 0 }}"
+    then:
+      - action: calendar.get_events
+        continue_on_error: true
+        target:
+          entity_id: "{{ calendars }}"
+        data:
+          start_date_time: "{{ today_at('00:00') }}"
+          end_date_time: "{{ today_at('00:00') + timedelta(days=lookahead_days | int) }}"
+        response_variable: cal
+  - if:
+      - condition: template
+        value_template: "{{ todo_list != '' }}"
+    then:
+      - action: todo.get_items
+        continue_on_error: true
+        target:
+          entity_id: "{{ todo_list }}"
+        data:
+          status: needs_action
+        response_variable: todos
+  - variables:
+      daypart: >-
+        {{ 'morning' if now().hour < 12 else ('afternoon' if now().hour < 17 else 'evening') }}
+      today_iso: "{{ now().date().isoformat() }}"
+      tomorrow_iso: "{{ (now() + timedelta(days=1)).date().isoformat() }}"
+      # Calendar lines: "HH:MM Summary" (all-day events carry no time).
+      cal_lines: >-
+        {% set ns = namespace(t=[], m=[], u=[]) %}
+        {% for cid, c in (cal | default({})).items() %}
+          {% for ev in (c.events | default([])) %}
+            {% set s = ev.start | string %}
+            {% set d = s[:10] %}
+            {% set tm = (s[11:16] ~ ' ') if s | length > 10 else '' %}
+            {% set line = tm ~ (ev.summary | default('') | string) %}
+            {% if d == today_iso %}{% set ns.t = ns.t + [line] %}
+            {% elif d == tomorrow_iso %}{% set ns.m = ns.m + [line] %}
+            {% elif d > tomorrow_iso %}{% set ns.u = ns.u + [d ~ ' ' ~ line] %}
+            {% endif %}
+          {% endfor %}
+        {% endfor %}
+        {{ {'today': ns.t | sort, 'tomorrow': ns.m | sort, 'upcoming': (ns.u | sort)[:12]} }}
+      task_lines: >-
+        {% set ns = namespace(l=[]) %}
+        {% if todos is defined and todo_list in todos %}
+          {% for it in (todos[todo_list]['items'] | default([])) %}
+            {% if it.due is defined and it.due %}
+              {% set ns.l = ns.l + [(it.due | string)[:10] ~ ' ' ~ it.summary] %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        {{ (ns.l | sort)[:8] }}
+      fact_lines: >-
+        {% set ns = namespace(l=[]) %}
+        {% for e in state_entities %}
+          {% set u = state_attr(e, 'unit_of_measurement') %}
+          {% set ns.l = ns.l + [(state_attr(e, 'friendly_name') or e) ~ ': ' ~ states(e) ~ (' ' ~ u if u else '')] %}
+        {% endfor %}
+        {{ ns.l }}
+      steer: >-
+        {{ states(steer_helper) if steer_helper != '' and states(steer_helper) not in ['unknown', 'unavailable', ''] else '' }}
+      instructions: >-
+        You write a short daily briefing for {{ audience }}. It is {{ daypart }} on {{ now().strftime('%A %B %-d') }}.
+        {% if daypart == 'evening' %}Frame it as a preview of tomorrow with anything still relevant tonight.{% endif %}
+
+        STANDING RULES (obey them over any instinct to be thorough):
+        {{ rules }}
+        {% if steer %}
+
+        THE READER'S LATEST CORRECTION, which overrides the rules above: {{ steer }}
+        {% endif %}
+
+        FACTS RIGHT NOW:
+        {% for l in fact_lines %}- {{ l }}
+        {% endfor %}
+        TODAY'S CALENDAR:
+        {% for l in cal_lines.today %}- {{ l }}
+        {% else %}- (nothing scheduled)
+        {% endfor %}
+        TOMORROW:
+        {% for l in cal_lines.tomorrow %}- {{ l }}
+        {% else %}- (nothing scheduled)
+        {% endfor %}
+        UPCOMING (next {{ lookahead_days }} days):
+        {% for l in cal_lines.upcoming %}- {{ l }}
+        {% else %}- (nothing)
+        {% endfor %}
+        TASKS WITH DUE DATES (soonest first):
+        {% for l in task_lines %}- {{ l }}
+        {% else %}- (none dated)
+        {% endfor %}
+
+        Everything you say must come from the lines above. Do not invent, do not
+        pad, do not moralize. The headline restates the single most important
+        line about today or later. On a quiet day, a short quiet headline and
+        an empty bullet list are the correct answer.
+  # ---- one call, structured; a second provider only if the first came back empty
+  - action: ai_task.generate_data
+    continue_on_error: true
+    data:
+      task_name: ai_daily_briefing
+      entity_id: "{{ ai_task }}"
+      instructions: "{{ instructions }}"
+      structure:
+        headline:
+          description: One short clause, max 90 characters, no greeting, no trailing period.
+          selector:
+            text:
+        briefing:
+          description: 2-4 sentences of judgment addressed to the household. No lists. Must not restate the headline.
+          selector:
+            text:
+              multiline: true
+        today_bullets:
+          description: 0-6 short noun-first bullets of today's specifics with times where known. Empty on a quiet day.
+          selector:
+            text:
+              multiple: true
+        look_ahead:
+          description: 0-4 short dated radar bullets for the coming weeks, with days-out where useful.
+          selector:
+            text:
+              multiple: true
+    response_variable: brief
+  - variables:
+      backend: primary
+      got_one: >-
+        {{ brief is defined and brief.data is defined
+           and ((brief.data.headline | default('', true) | string | trim) != ''
+                or (brief.data.briefing | default('', true) | string | trim) != '') }}
+  - if:
+      - condition: template
+        value_template: "{{ not got_one and fallback_ai_task != '' }}"
+    then:
+      - action: ai_task.generate_data
+        continue_on_error: true
+        data:
+          task_name: ai_daily_briefing
+          entity_id: "{{ fallback_ai_task }}"
+          instructions: "{{ instructions }}"
+          structure:
+            headline:
+              description: One short clause, max 90 characters, no greeting, no trailing period.
+              selector:
+                text:
+            briefing:
+              description: 2-4 sentences of judgment addressed to the household. No lists. Must not restate the headline.
+              selector:
+                text:
+                  multiline: true
+            today_bullets:
+              description: 0-6 short noun-first bullets of today's specifics with times where known. Empty on a quiet day.
+              selector:
+                text:
+                  multiple: true
+            look_ahead:
+              description: 0-4 short dated radar bullets for the coming weeks, with days-out where useful.
+              selector:
+                text:
+                  multiple: true
+        response_variable: brief_alt
+      - variables:
+          brief: "{{ brief_alt if (brief_alt is defined and brief_alt.data is defined) else brief }}"
+          backend: fallback
+  # ---- shape the output
+  - variables:
+      head: "{{ ((brief.data.headline | default('', true) | string | trim)[:90]) if (brief is defined and brief.data is defined) else '' }}"
+      body: "{{ (brief.data.briefing | default('', true) | string | trim) if (brief is defined and brief.data is defined) else '' }}"
+      today_b: "{{ ((brief.data.today_bullets | default([], true)) | list)[:(max_bullets | int)] if (brief is defined and brief.data is defined) else [] }}"
+      ahead_b: "{{ ((brief.data.look_ahead | default([], true)) | list)[:4] if (brief is defined and brief.data is defined) else [] }}"
+  - if:
+      - condition: template
+        value_template: "{{ headline_helper != '' }}"
+    then:
+      - action: input_text.set_value
+        continue_on_error: true
+        target:
+          entity_id: "{{ headline_helper }}"
+        data:
+          value: "{{ head[:255] }}"
+  - event: ai_daily_briefing
+    event_data:
+      headline: "{{ head }}"
+      briefing: "{{ body }}"
+      today: "{{ today_b }}"
+      look_ahead: "{{ ahead_b }}"
+      daypart: "{{ daypart }}"
+      backend: "{{ backend }}"
+  # Silence is a valid output: an empty result sends nothing.
+  - if:
+      - condition: template
+        value_template: "{{ head != '' or body != '' }}"
+    then:
+      - action: "{{ notify_service }}"
+        continue_on_error: true
+        data:
+          title: "{{ head if head else 'Today' }}"
+          message: >-
+            {{ body }}{% if today_b | count > 0 %}
+
+            {% for b in today_b %}• {{ b }}
+            {% endfor %}{% endif %}{% if ahead_b | count > 0 %}
+            Looking ahead:
+            {% for b in ahead_b %}• {{ b }}
+            {% endfor %}{% endif %}

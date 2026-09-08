@@ -1,13 +1,11 @@
 # Building an AI daily briefing on top of Home Assistant
 
-This isn't a blueprint - there's no single `!input`-driven YAML file that
-drops this in. It's a multi-part system: a scheduled process, an LLM call,
-and a notification route, glued together outside Home Assistant's
-automation engine. This page describes the general shape of it and the
-judgment calls that made it useful day-to-day, in case it's useful as a
-reference for building your own. No specific hardware, integration, or LLM
-provider is required to build a version of this - any scheduler, any LLM
-API, and any `notify.*` target work.
+The core of this is now a blueprint - [AI Daily Briefing](../blueprints/automation/ohlemacherd/ai-daily-briefing.yaml):
+gather, one AI Task call under standing rules, deliver. This page is the
+reasoning behind it and a description of the larger system the blueprint is
+the centre of, in case you want to grow yours the same way. No specific
+hardware, integration or LLM provider is required - any scheduler, any LLM
+API and any `notify.*` target work.
 
 ## The shape of it
 
@@ -81,3 +79,40 @@ No specific prompt text, no specific sensor list, no specific schedule.
 Those are all household-specific by nature - what's worth mentioning in
 one home (a kid's school pickup, a specific appliance) is noise in another.
 The pattern above is the reusable part; the content is yours to fill in.
+
+## What the blueprint is, and what the full second brain is
+
+The blueprint is the daily loop: facts in, one call, a briefing out, a steer
+line back in. Everything below is what grew around that loop over a year,
+described in shape only.
+
+- **A ledger of open actions, not a to-do app.** One append-only file of
+  small JSON rows (an action, a decision someone owes, a thing to verify by a
+  date, a note), each with a priority and an owner - the person or the
+  automation side. Every session that touches the house reads it first and
+  writes back with evidence. The briefing reads it too, so "the one stalled
+  decision" can surface without anyone remembering to raise it.
+- **A triage relay.** A scheduled process outside Home Assistant that reads
+  the family's notes, the calendar and the ledger, sanitizes what the
+  briefing may see (health and money never reach the model), and pushes a
+  compact context block into a sensor the blueprint-style prompt reads.
+- **Steers that graduate into rules.** A one-shot steer corrects tomorrow.
+  A steer prefixed as a rule is promoted into a standing-instructions note
+  that every future run reads - so the reader's corrections accumulate
+  instead of evaporating.
+- **A deterministic floor.** When the model is down or out of credits the
+  card falls back to a plain schedule-and-weather view labelled as such,
+  rather than freezing on yesterday's text. A frozen card that looks fresh
+  is the worst outcome; a labelled basic view costs nothing.
+- **Routing, not notifying.** One script owns the question "does this reach
+  a phone, a daily digest, or just the log?" Every automation calls it with
+  a route instead of a notify service. Changing who gets what is one edit.
+- **Counters on every AI call.** How many calls, which backend, how many
+  fallbacks - on a dashboard card, so a week of quietly degraded briefings
+  can be told apart from a week of good ones after the fact.
+- **Audits that compound.** Every few weeks a session grades every unit on
+  four rungs - does it notice its own failure, would anyone find out, does
+  it degrade gracefully, does a repeat failure become a permanent guard -
+  and writes the residue back into the ledger. The house is strong on the
+  first and third rungs and had to be taught the second and fourth; most
+  home automation setups are the same.
