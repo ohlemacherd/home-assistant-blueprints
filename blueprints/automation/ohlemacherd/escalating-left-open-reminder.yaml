@@ -1,0 +1,183 @@
+blueprint:
+  name: Escalating Left-Open Reminder
+  description: >
+    A door left open, a garage that never closed, a sump pump running far
+    longer than a normal cycle, a space heater still on an hour after
+    everyone left the room - all the same shape of problem: a binary state
+    that's fine briefly and a real problem if it doesn't clear. A single
+    fixed-delay reminder either nags people mid-grocery-unload or waits so
+    long it's useless as a safety alert; this uses three escalating stages
+    instead, so normal use never triggers anything past the first, quiet
+    stage, and something genuinely left alone gets progressively louder.
+
+
+    Stage 1 (short delay) is a quiet, default-priority notification. Stage 2
+    (longer) is high priority. Stage 3 (longest) is high priority and sticky
+    (stays on the lock screen until dismissed) - by that point it's almost
+    never intentional. Each stage reuses the same notification tag, so a
+    later stage replaces the earlier banner instead of stacking three of
+    them. The moment the entity clears, the banner is dismissed
+    automatically; a real "it's clear now" push is optional and off by
+    default, matching the same reasoning as this repo's Debounced Outage
+    Alert blueprint - recovering doesn't need to buzz a phone.
+  domain: automation
+  author: ohlemacherd
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/escalating-left-open-reminder.yaml
+  input:
+    target_entity:
+      name: Entity to watch
+      description: >-
+        Typically a binary_sensor (a door/window contact, a "problem" or
+        "running" sensor) but any entity with a small set of string states
+        works.
+      selector:
+        entity: {}
+    bad_state:
+      name: "\"Left open/on\" state"
+      default: "on"
+      selector:
+        text: {}
+    ok_state:
+      name: "\"Cleared\" state"
+      default: "off"
+      selector:
+        text: {}
+    state_word:
+      name: Word describing the bad state
+      description: >-
+        Used in the notification text - e.g. "open" for a door, "running"
+        for a pump, "on" for a space heater.
+      default: open
+      selector:
+        text: {}
+    stage1_minutes:
+      name: Stage 1 delay (minutes)
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 1440
+          step: 1
+          mode: box
+    stage2_minutes:
+      name: Stage 2 delay (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 1440
+          step: 1
+          mode: box
+    stage3_minutes:
+      name: Stage 3 delay (minutes)
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 1440
+          step: 1
+          mode: box
+    notify_service:
+      name: Notify service
+      selector:
+        text: {}
+    notify_on_clear:
+      name: Also push a notification when it clears?
+      description: >-
+        Off by default - clearing just dismisses the existing banner
+        silently. Turn this on to also get a push confirming it cleared.
+      default: false
+      selector:
+        boolean: {}
+
+mode: single
+
+variables:
+  target_entity: !input target_entity
+  state_word: !input state_word
+  notify_on_clear: !input notify_on_clear
+  stage1_minutes: !input stage1_minutes
+  stage2_minutes: !input stage2_minutes
+  stage3_minutes: !input stage3_minutes
+
+triggers:
+  - trigger: state
+    entity_id: !input target_entity
+    to: !input bad_state
+    for:
+      minutes: !input stage1_minutes
+    id: stage1
+  - trigger: state
+    entity_id: !input target_entity
+    to: !input bad_state
+    for:
+      minutes: !input stage2_minutes
+    id: stage2
+  - trigger: state
+    entity_id: !input target_entity
+    to: !input bad_state
+    for:
+      minutes: !input stage3_minutes
+    id: stage3
+  - trigger: state
+    entity_id: !input target_entity
+    to: !input ok_state
+    id: cleared
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: stage1
+        sequence:
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              title: "{{ state_attr(target_entity, 'friendly_name') or target_entity }} left {{ state_word }}"
+              message: "Left {{ state_word }} for {{ stage1_minutes }} minute(s) - probably nothing."
+              data:
+                tag: "left_open_{{ target_entity }}"
+      - conditions:
+          - condition: trigger
+            id: stage2
+        sequence:
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              title: "{{ state_attr(target_entity, 'friendly_name') or target_entity }} still {{ state_word }}"
+              message: "Still {{ state_word }} after {{ stage2_minutes }} minutes - worth a look."
+              data:
+                priority: high
+                tag: "left_open_{{ target_entity }}"
+      - conditions:
+          - condition: trigger
+            id: stage3
+        sequence:
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              title: "{{ state_attr(target_entity, 'friendly_name') or target_entity }} STILL {{ state_word }}"
+              message: "Still {{ state_word }} after {{ stage3_minutes }} minutes - this doesn't look intentional."
+              data:
+                priority: high
+                ttl: 0
+                tag: "left_open_{{ target_entity }}"
+      - conditions:
+          - condition: trigger
+            id: cleared
+        sequence:
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              message: clear_notification
+              data:
+                tag: "left_open_{{ target_entity }}"
+          - if:
+              - condition: template
+                value_template: "{{ notify_on_clear }}"
+            then:
+              - action: !input notify_service
+                continue_on_error: true
+                data:
+                  title: "{{ state_attr(target_entity, 'friendly_name') or target_entity }} clear"
+                  message: "No longer {{ state_word }}."
