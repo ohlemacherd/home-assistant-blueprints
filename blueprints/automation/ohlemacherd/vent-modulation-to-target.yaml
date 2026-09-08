@@ -1,0 +1,185 @@
+blueprint:
+  name: Vent/Register Modulation Against a Target
+  description: >
+    Opens a room's smart vents/registers when the house's active heating or
+    cooling would actually help that room, and closes them once the room is
+    within a hysteresis band of its target. Does nothing while the system is
+    idle - a vent stays exactly where it last was rather than being forced
+    open or shut for no reason.
+
+
+    Written for anyone running smart vents (Flair, Keen, or similar) in a
+    manual/non-cloud mode alongside a smart thermostat - see the companion
+    "Effective Thermostat Target" template-sensor blueprint in this repo for
+    why that combination needs its own target source. This automation only
+    needs a room temperature sensor, a numeric target, and the thermostat's
+    own hvac_action - it never touches the vent system's own occupancy or
+    activity concepts, so it keeps working exactly the same whether the vent
+    system is in its normal cloud mode or a fully manual one.
+
+
+    Logic, one room at a time: while the thermostat is actively cooling and
+    the room is warmer than target by more than the hysteresis, open the
+    vent. While it is actively heating and the room is cooler than target by
+    more than the hysteresis, open the vent. Any other time the system is
+    running - room already at or past target - close the vent so conditioned
+    air gets diverted to rooms that still need it. The system being off or
+    idle is left alone entirely.
+  domain: automation
+  author: ohlemacherd
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml
+  input:
+    thermostat:
+      name: Thermostat
+      description: >-
+        The climate entity that drives the system. Its hvac_action attribute
+        (heating / cooling / idle / off) decides which direction, if any,
+        this room's vent should move.
+      selector:
+        entity:
+          filter:
+            - domain: climate
+    target_temp_sensor:
+      name: Target temperature sensor
+      description: >-
+        A numeric sensor giving the temperature this room should be at.
+        Works well with this repo's "Effective Thermostat Target" blueprint,
+        but any numeric sensor (a per-room target helper, a fixed
+        input_number, etc.) works too.
+      selector:
+        entity:
+          filter:
+            - domain:
+                - sensor
+                - input_number
+    room_temp_sensor:
+      name: Room temperature sensor
+      description: This room's own temperature sensor.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    vents:
+      name: Vents/registers
+      description: One or more cover entities that control airflow into this room.
+      selector:
+        entity:
+          filter:
+            - domain: cover
+          multiple: true
+    position_type:
+      name: Position type
+      description: >-
+        Whether these vent covers use a plain open/close position or a tilt
+        position. Most DIY and off-the-shelf smart vents use plain position;
+        some (Flair pucks among them) use tilt.
+      default: position
+      selector:
+        select:
+          options:
+            - label: Position (cover.set_cover_position)
+              value: position
+            - label: Tilt (cover.set_cover_tilt_position)
+              value: tilt
+    open_value:
+      name: Open value
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          mode: box
+    closed_value:
+      name: Closed value
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 100
+          step: 1
+          mode: box
+    hysteresis:
+      name: Hysteresis (degrees)
+      description: >-
+        How far past target the room has to be, in the helpful direction,
+        before the vent opens. Keeps a vent from chattering open/closed
+        right at the setpoint.
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.5
+          mode: box
+    settle_minutes:
+      name: Settle time before reacting to a temperature change (minutes)
+      description: >-
+        A short debounce on the room-temperature trigger, so a single noisy
+        reading doesn't flip the vent. Target and mode changes react
+        immediately; only the room sensor itself is debounced.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          mode: box
+
+mode: single
+
+variables:
+  thermostat: !input thermostat
+  target_temp_sensor: !input target_temp_sensor
+  room_temp_sensor: !input room_temp_sensor
+  position_type: !input position_type
+  open_value: !input open_value
+  closed_value: !input closed_value
+  hysteresis: !input hysteresis
+
+triggers:
+  - trigger: state
+    entity_id: !input room_temp_sensor
+    for:
+      minutes: !input settle_minutes
+    id: room_temp_change
+  - trigger: state
+    entity_id: !input target_temp_sensor
+    id: target_change
+  - trigger: state
+    entity_id: !input thermostat
+    attribute: hvac_action
+    id: mode_change
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ state_attr(thermostat, 'hvac_action') in ['heating', 'cooling'] }}
+
+actions:
+  - variables:
+      hvac_action: "{{ state_attr(thermostat, 'hvac_action') }}"
+      room_temp: "{{ states(room_temp_sensor) | float(0) }}"
+      target_temp: "{{ states(target_temp_sensor) | float(0) }}"
+      diff: "{{ room_temp - target_temp }}"
+      want_open: >-
+        {{ (hvac_action == 'cooling' and diff > hysteresis) or
+           (hvac_action == 'heating' and diff < -hysteresis) }}
+      value: "{{ open_value if want_open else closed_value }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ position_type == 'tilt' }}"
+        sequence:
+          - action: cover.set_cover_tilt_position
+            target:
+              entity_id: !input vents
+            data:
+              tilt_position: "{{ value }}"
+    default:
+      - action: cover.set_cover_position
+        target:
+          entity_id: !input vents
+        data:
+          position: "{{ value }}"
