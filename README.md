@@ -70,6 +70,14 @@ Also in the repo:
 
 **File:** [`blueprints/automation/ohlemacherd/ai-daily-briefing.yaml`](blueprints/automation/ohlemacherd/ai-daily-briefing.yaml)
 
+| At a glance | |
+|---|---|
+| **What's in it for me** | One paragraph a day that makes the small decisions - what matters today, what can wait, what needs a nudge before an event - so nobody in the house merges five apps in their head at 6:30am. A one-line steer box so it learns your household in a week. |
+| **What I need** | An AI Task entity (any provider, core integration) and at least one calendar. Optional: a to-do list, two `input_text` helpers (steer, headline), a second provider for failover, the Companion app for push. |
+| **Effort** | **Medium** - 20 min to import and pick entities, then a week of one-line steers until it reads right. No YAML. |
+| **Cost - required** | **$0 hardware.** LLM calls: roughly **$1-3 / month** on a cheap model (one call a day), **$0** with a local Ollama model. |
+| **Cost - optional** | A wall tablet to read it on, $100-400. Nabu Casa not needed. |
+
 Once a day (or twice), gathers what the house actually knows - the calendars
 the household can act on, a to-do list (dated items only), any sensor states
 you name - and hands it to an AI Task entity with a short set of judgment
@@ -121,6 +129,14 @@ and it's what makes the thing feel like it learns.
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fcharger-done-outlet-off.yaml)
 
 **File:** [`blueprints/automation/ohlemacherd/charger-done-outlet-off.yaml`](blueprints/automation/ohlemacherd/charger-done-outlet-off.yaml)
+
+| At a glance | |
+|---|---|
+| **What's in it for me** | Batteries on dumb chargers stop being cooked on float for a week at a time - a ride-on pack, e-bike or drill battery lasts years instead of a season - and nobody has to remember to unplug anything. |
+| **What I need** | A power-monitoring smart plug (switch + live watts + today's kWh) and one Toggle helper. A notify service if you want to hear about it. |
+| **Effort** | **Low** - 10 minutes. Glance at the plug's power graph during one real charge to confirm the 15 W / 5 W thresholds. |
+| **Cost - required** | **One power-monitoring plug, $12-25** (Kasa EP25 ~$20, Shelly Plug S ~$25, Sonoff S31 ~$12). Free if the device already sits on one. |
+| **Cost - optional** | None. |
 
 Turns a power-monitoring smart plug off once whatever is charging on it has
 actually finished, instead of leaving it trickle-charging indefinitely.
@@ -184,6 +200,14 @@ charge from empty.
 
 **File:** [`blueprints/automation/ohlemacherd/debounced-outage-alert.yaml`](blueprints/automation/ohlemacherd/debounced-outage-alert.yaml)
 
+| At a glance | |
+|---|---|
+| **What's in it for me** | One page per real outage instead of a stream of down/up pushes - so you keep reading the alerts. Recovery is logged, not buzzed. |
+| **What I need** | Any entity whose state means up/down, one Toggle helper per watched thing, a notify service. |
+| **Effort** | **Low** - 5 minutes. |
+| **Cost - required** | **$0.** |
+| **Cost - optional** | None. |
+
 Pages once per real outage instead of once per flip. Written for anything
 that flaps - a camera stream that stalls and recovers on its own, an
 integration that drops overnight and comes back before anyone's up to see
@@ -227,6 +251,14 @@ Template or Threshold helper) and point this at that.
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fdevice-watchdog-power-cycle.yaml)
 
 **File:** [`blueprints/automation/ohlemacherd/device-watchdog-power-cycle.yaml`](blueprints/automation/ohlemacherd/device-watchdog-power-cycle.yaml)
+
+| At a glance | |
+|---|---|
+| **What's in it for me** | A hub, bridge or Pi that goes deaf gets you one notification instead of a hundred - and, if you opt in, one capped power-cycle so you stop being the person who walks to the closet and pulls the plug. |
+| **What I need** | A few entities that go unavailable when the device is unreachable, one Toggle helper, a notify service. For auto power-cycle: a smart plug on the device and one Counter helper. |
+| **Effort** | **Low-Medium** - 15 minutes; two helpers if you enable power-cycling. |
+| **Cost - required** | **$0** as a notifier. |
+| **Cost - optional** | **A smart plug per device you want cycled, $10-25.** Not for the Pi running Home Assistant itself - it can't cycle its own power; use the plug's own schedule for that one. |
 
 For a single point of failure that lives on a smart plug - a hub or bridge,
 a Raspberry Pi, a Wi-Fi extender, anything where "someone pulls the plug
@@ -276,6 +308,14 @@ purely as an offline notifier.
 
 **File:** [`blueprints/automation/ohlemacherd/escalating-left-open-reminder.yaml`](blueprints/automation/ohlemacherd/escalating-left-open-reminder.yaml)
 
+| At a glance | |
+|---|---|
+| **What's in it for me** | A door-left-open alert that never nags mid-grocery-unload and is loud by the time it matters: quiet at 1 min, high priority at 5, sticky at 15, one banner that replaces itself, dismissed the moment the door closes. Same shape works for a sump pump or a space heater. |
+| **What I need** | A contact sensor (or any binary sensor) and the Home Assistant Companion app for the tag / priority / clear-banner behaviour. |
+| **Effort** | **Low** - 5 minutes. |
+| **Cost - required** | **A contact sensor, $15-40** (Aqara ~$15-20, Sonoff ~$12, Hue Secure ~$40). $0 if you already have door sensors. |
+| **Cost - optional** | A Zigbee coordinator, $20-40, if you have no Zigbee radio yet (Hue Secure needs a Hue bridge, ~$60). |
+
 A door left open, a garage that never closed, a pump running far longer
 than a normal cycle, a space heater still on an hour after everyone left
 the room - all the same shape of problem: a binary state that's fine
@@ -315,6 +355,14 @@ Any entity with a "bad" and "ok" state - typically a `binary_sensor`
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Ftemplate%2Fohlemacherd%2Feffective-thermostat-target.yaml)
 
 **File:** [`blueprints/template/ohlemacherd/effective-thermostat-target.yaml`](blueprints/template/ohlemacherd/effective-thermostat-target.yaml)
+
+| At a glance | |
+|---|---|
+| **What's in it for me** | One number - what the thermostat is actually aiming for right now - that every room automation can read in any mode, instead of six copies of the heat/cool/heat_cool attribute dance. The fix for smart vents in manual mode. |
+| **What I need** | A `climate` entity. That's it - this is a Template helper created from the blueprint. |
+| **Effort** | **Low** - 5 minutes (Helpers -> Template -> use a blueprint). |
+| **Cost - required** | **$0** with any smart thermostat you already own. |
+| **Cost - optional** | A smart thermostat if you have none: Ecobee $170-250, Nest $130-280. |
 
 Creates one sensor: the temperature your thermostat is actually trying to
 hit right now, as a single number, no matter which of its modes (heat,
@@ -364,6 +412,14 @@ Template a sensor**, then choose "use a blueprint."
 [![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fvent-modulation-to-target.yaml)
 
 **File:** [`blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml`](blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml)
+
+| At a glance | |
+|---|---|
+| **What's in it for me** | Hot and cold rooms even out without the vent vendor's cloud writing your thermostat behind your back, and battery vents stop chattering (one guest room went from 204 moves a day to single digits). |
+| **What I need** | Smart vents with `cover` entities (Flair via its HACS integration), a temperature sensor in each room, a thermostat with `hvac_action`, and a target sensor (the template blueprint above). One instance per room. |
+| **Effort** | **Medium** - 15 minutes per room, then a week of watching move counts and adjusting the hysteresis. |
+| **Cost - required** | **Smart vents, $70-100 each** for the rooms you want to control, plus a smart thermostat (above) if you have none. |
+| **Cost - optional** | A per-room temperature sensor if the vent kit doesn't include one, $20-100 (a Zigbee sensor at the low end, a vendor puck at the high). Extra pucks for rooms without vents. |
 
 Opens a room's smart vents/registers when the house's active heating or
 cooling would actually help that room, and closes them once the room is
