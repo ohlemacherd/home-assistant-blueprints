@@ -49,6 +49,18 @@ blueprint:
       default: Effective Thermostat Target
       selector:
         text: {}
+    unit:
+      name: Temperature unit
+      description: >-
+        Purely a label on the sensor - pick what your thermostat reports
+        in. Celsius users: also set the sanity floor/ceiling/fallback below
+        to values like 15 / 30 / 21, since the defaults are Fahrenheit.
+      default: "°F"
+      selector:
+        select:
+          options:
+            - "°F"
+            - "°C"
     heating_action_value:
       name: '"Actively heating" value'
       description: >-
@@ -107,8 +119,7 @@ variables:
 
 sensor:
   - name: !input sensor_name
-    unique_id: effective_thermostat_target
-    unit_of_measurement: "°"
+    unit_of_measurement: !input unit
     icon: mdi:thermometer-check
     state: >
       {% set mode = states(thermostat) %}

@@ -57,6 +57,22 @@ blueprint:
           step: 1
           unit_of_measurement: minutes
           mode: box
+    recover_minutes:
+      name: Minutes back up before it counts as recovered
+      description: >-
+        The entity has to be out of the down state continuously this long
+        before the outage is considered over and the "already paged"
+        helper resets. Without this, a 30-second blip mid-outage would
+        re-arm the page and a flapping entity would page every
+        confirmation window.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 240
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
     label:
       name: What to call this in the notification
       description: 'e.g. "Driveway camera stream", "Weather station uplink".'
@@ -109,7 +125,10 @@ triggers:
     id: down
   - trigger: state
     entity_id: !input health_entity
-    id: changed
+    from: !input down_state
+    for:
+      minutes: !input recover_minutes
+    id: recovered
 
 actions:
   - choose:
@@ -133,7 +152,7 @@ actions:
                 outage again until it recovers.
       - conditions:
           - condition: trigger
-            id: changed
+            id: recovered
           - condition: template
             value_template: "{{ states(health_entity) != down_state }}"
           - condition: state

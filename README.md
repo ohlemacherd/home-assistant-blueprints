@@ -4,6 +4,20 @@ A small collection of Home Assistant automation and template blueprints,
 plus one write-up. This is a hobby side-project, not a supported product -
 see "Honest expectations" below.
 
+## Importing
+
+Each blueprint below has an **Import** button that opens your own Home
+Assistant with the blueprint pre-filled (via [My Home Assistant](https://my.home-assistant.io/)).
+Or by hand: **Settings -> Automations & scenes -> Blueprints -> Import
+blueprint**, and paste the file's GitHub URL. The template sensor imports the
+same way and then appears under **Settings -> Devices & services -> Helpers
+-> Create helper -> Template**.
+
+Notification inputs take any `notify.*` service. The `tag`, `priority` and
+`clear_notification` conventions two of these blueprints use are Home
+Assistant Companion (mobile app) features; other notify platforms ignore
+them harmlessly.
+
 ## Contents
 
 | Blueprint | Type | What it's for |
@@ -19,6 +33,8 @@ see "Honest expectations" below.
 ---
 
 ## Smart Plug Charger Cutoff
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fcharger-done-outlet-off.yaml)
 
 **File:** [`blueprints/automation/ohlemacherd/charger-done-outlet-off.yaml`](blueprints/automation/ohlemacherd/charger-done-outlet-off.yaml)
 
@@ -73,12 +89,14 @@ charge from empty.
 | **Done power threshold (W)** | Once charging has started, draw under this many watts means the charger has dropped to float/trickle. Default 5 W. |
 | **Minutes under threshold before calling it done** | How long the draw has to stay under the done threshold before the plug switches off. Default 30 minutes. |
 | **Turn the plug back on automatically?** | Off by default - the plug just stays off until switched back on by hand (or its own button). Turn on to enable the daily restore time below. |
-| **Daily restore time** | Only used if the above is enabled. Default 06:00. Harmless to fire with nothing plugged in. |
-| **Notify service** | Which `notify.*` service to call when the plug switches off, e.g. `notify.mobile_app_your_phone`, or a notify group. Defaults to `notify.notify` (a Home Assistant persistent notification, no push required). |
+| **Daily restore time** | Only used if the above is enabled. Default 06:00. Harmless to fire with nothing plugged in. A charger still on a full battery just floats after the restore (it never re-arms the session flag) - one day of float is fine, which is the whole point of not leaving it for a week. |
+| **Notify service** | Which `notify.*` service to call when the plug switches off, e.g. `notify.mobile_app_your_phone`, or a notify group. Defaults to `notify.persistent_notification` (built in; shows under Settings -> Notifications, no push required). |
 
 ---
 
 ## Effective Thermostat Target (Template Sensor)
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Ftemplate%2Fohlemacherd%2Feffective-thermostat-target.yaml)
 
 **File:** [`blueprints/template/ohlemacherd/effective-thermostat-target.yaml`](blueprints/template/ohlemacherd/effective-thermostat-target.yaml)
 
@@ -119,12 +137,15 @@ Template a sensor**, then choose "use a blueprint."
 | **Thermostat** | The climate entity to read the active target from. |
 | **Sensor name** | Name for the resulting sensor. Change it if you use this blueprint more than once (multi-zone home). |
 | **"Actively heating" value** | The hvac_action value meaning "furnace is running" - almost always `heating`. Only matters in heat_cool/auto mode. |
-| **Sanity floor / ceiling** | If the computed target ever comes out outside this range, the fallback value is reported instead. Defaults 60-80. |
-| **Fallback value** | Reported when the computed target fails the sanity check. Default 70. |
+| **Temperature unit** | A label for the sensor - °F or °C. |
+| **Sanity floor / ceiling** | If the computed target ever comes out outside this range, the fallback value is reported instead. Defaults 60-80 (Fahrenheit - Celsius users set roughly 15 / 30). |
+| **Fallback value** | Reported when the computed target fails the sanity check. Default 70 (Celsius: 21). |
 
 ---
 
 ## Vent/Register Modulation Against a Target
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fvent-modulation-to-target.yaml)
 
 **File:** [`blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml`](blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml)
 
@@ -162,11 +183,14 @@ in its normal cloud mode or a fully manual one.
 | **Position type** | Plain position or tilt position - matches your specific vent hardware. |
 | **Open value / Closed value** | The position numbers meaning fully open/closed. Defaults 100/0. |
 | **Hysteresis (degrees)** | How far past target, in the helpful direction, before the vent opens. Default 1°. |
+| **Skip when already in position?** | On by default: don't re-send a position the vents already report, so a cloud vent isn't commanded every few minutes. Turn off only if your vents report position unreliably. |
 | **Settle time (minutes)** | A short debounce on the room-sensor trigger only, so one noisy reading doesn't flip the vent. Default 2. |
 
 ---
 
 ## Debounced Outage Alert
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fdebounced-outage-alert.yaml)
 
 **File:** [`blueprints/automation/ohlemacherd/debounced-outage-alert.yaml`](blueprints/automation/ohlemacherd/debounced-outage-alert.yaml)
 
@@ -200,6 +224,7 @@ Template or Threshold helper) and point this at that.
 | **Entity to watch** | Any entity with an up/down-shaped state. |
 | **"Down" state** | The exact state value meaning trouble, e.g. `unavailable`. |
 | **Minutes before it counts as a real outage** | How long the down state must hold continuously first. Default 10. |
+| **Minutes back up before it counts as recovered** | How long it must stay out of the down state before the outage is over and the helper resets. Default 2 - keeps a mid-outage blip from re-arming the page. |
 | **What to call this** | Used in notification text. |
 | **"Already paged" helper** | The Toggle helper above. |
 | **Notify service (down alert)** | e.g. `notify.mobile_app_your_phone`. |
@@ -208,6 +233,8 @@ Template or Threshold helper) and point this at that.
 ---
 
 ## Device Watchdog with Optional Auto Power-Cycle
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fdevice-watchdog-power-cycle.yaml)
 
 **File:** [`blueprints/automation/ohlemacherd/device-watchdog-power-cycle.yaml`](blueprints/automation/ohlemacherd/device-watchdog-power-cycle.yaml)
 
@@ -254,6 +281,8 @@ purely as an offline notifier.
 ---
 
 ## Escalating Left-Open Reminder
+
+[![Open your Home Assistant instance and show the blueprint import dialog with a specific blueprint pre-filled.](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fgithub.com%2Fohlemacherd%2Fhome-assistant-blueprints%2Fblob%2Fmain%2Fblueprints%2Fautomation%2Fohlemacherd%2Fescalating-left-open-reminder.yaml)
 
 **File:** [`blueprints/automation/ohlemacherd/escalating-left-open-reminder.yaml`](blueprints/automation/ohlemacherd/escalating-left-open-reminder.yaml)
 

@@ -120,7 +120,12 @@ blueprint:
       description: >-
         If off, the plug simply stays off once a charge is done, until
         someone (or the plug's own button) turns it back on. If on, the
-        plug is switched back on automatically at the time below.
+        plug is switched back on automatically at the time below. Note
+        that a charger left connected to an already-full battery draws
+        only its float current after the restore, never crosses the
+        charging threshold, and so is not cut again that day - the
+        session flag only arms on a real charge. That is by design: one
+        day of float is harmless, a week of it is not.
       default: false
       selector:
         boolean: {}
@@ -137,9 +142,10 @@ blueprint:
       description: >-
         The notify service to call when the plug switches off, e.g.
         notify.mobile_app_your_phone, or a notify group covering more than
-        one device. Leave the default (notify.notify) to get a Home
-        Assistant persistent notification instead of a push.
-      default: notify.notify
+        one device. The default, notify.persistent_notification, is built
+        into every Home Assistant and shows up under Settings ->
+        Notifications instead of pushing to a phone.
+      default: notify.persistent_notification
       selector:
         text: {}
 
