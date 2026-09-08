@@ -36,13 +36,9 @@ most people can use today; the bottom needs specific hardware.
 | 6 | [Effective Thermostat Target (Template Sensor)](#effective-thermostat-target-template-sensor) | Template sensor | Nobody else has it, but you only need it if a climate entity's mode-dependent target attributes have bitten you. |
 | 7 | [Vent/Register Modulation Against a Target](#ventregister-modulation-against-a-target) | Automation | Unique, but needs smart vents plus a thermostat with hvac_action - the narrowest audience here. |
 
-Also in the repo, not blueprints:
+Also in the repo:
 
-- [More ideas, by the hardware they need](docs/ideas-by-hardware.md) - everything else that runs in the same house, grouped by the device it depends on, so you can see what a purchase would unlock (or steal the idea for hardware you already have).
-- [The hard-won ones](docs/hard-won.md) - the fifteen automations that had to be fixed the most times (measured: dated revisions in their own descriptions), each with the lesson it finally taught. If you build one thing from here, build the thing whose failure modes are already written down.
-- [The HVAC engine](docs/hvac-engine.md) - one thermostat, six smart vents, ~30 automations in seven layers, and the lessons (the 212°F sensor morning, the guard that called its own write "manual", the pull chain software can't see).
 - [Dashboard patterns](docs/dashboard-patterns.md) + two [button-card templates](dashboard/templates/) - a room tile that reads as a heat map, a scene tile that shows it's working, and five measured facts about the sections engine.
-- [Building an AI daily briefing on top of Home Assistant](docs/ai-briefing-writeup.md) - the shape of a scheduled-process + LLM + notify-service briefing and the judgment calls that made it useful.
 
 ---
 
@@ -71,9 +67,7 @@ an input: *mention something only if it would change what the reader does
 today; noun-first, never commands, never guilt; never health or money; a
 quiet day is allowed to be quiet.* The one-line **steer** helper is the
 feedback loop - "stop mentioning the trash", "lead with the kids' schedule" -
-and it's what makes the thing feel like it learns. The longer write-up is
-[here](docs/ai-briefing-writeup.md), including what the full second brain
-does beyond this blueprint.
+and it's what makes the thing feel like it learns.
 
 ### What you need before importing
 
