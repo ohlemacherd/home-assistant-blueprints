@@ -81,13 +81,19 @@ blueprint:
           mode: box
     notify_service:
       name: Notify service
-      description: The Companion app service (notify.mobile_app_...) gets the escalating priority, the replacing banner and the auto-dismiss; any other notify service just gets three messages.
+      description: >-
+        The Companion app service (notify.mobile_app_...) gets the escalating
+        priority, the replacing banner and the auto-dismiss; any other notify
+        service just gets three messages.
       default: notify.persistent_notification
       selector:
         text: {}
     companion_app:
       name: Is the notify service the Companion app?
-      description: On (default): send the priority/tag/clear-banner extras. Off: plain messages only - a non-Companion service would otherwise show a literal "clear_notification".
+      description: >-
+        On (default) sends the priority / tag / clear-banner extras. Off sends
+        plain messages only - a non-Companion service would otherwise show a
+        literal "clear_notification".
       default: true
       selector:
         boolean: {}
