@@ -1,0 +1,210 @@
+blueprint:
+  name: Smart Plug Charger Cutoff
+  description: >
+    Turns a power-monitoring smart plug off once whatever is charging on it
+    has actually finished, and (optionally) turns it back on at a set time
+    every day. Written for battery-powered devices that would otherwise
+    trickle-charge indefinitely if left plugged in - ride-on toys, e-bikes,
+    drill batteries, and similar - where "just unplug it when it's full"
+    isn't realistic.
+
+
+    "Done charging" is decided with a two-step flag instead of a single
+    fixed energy threshold. The moment the plug's live power draw crosses
+    the charging-power threshold, a helper you create is switched on to
+    remember that a real charge is underway. Only once that flag is on
+    *and* the draw has stayed under the done-power threshold for the chosen
+    number of minutes does the plug switch off and the flag reset.
+
+
+    A plain "has today's energy total passed X kWh" test was tried first
+    and doesn't hold up: a battery that starts out partially charged can
+    finish a genuine, complete charge well under whatever fixed kWh number
+    you'd pick for "a real charge happened," so that kind of test either
+    misses short-but-real charges or has to be set so low it also fires
+    when nothing meaningful was plugged in. Tracking whether real charging
+    *current* was ever seen this cycle, rather than how much energy it took,
+    avoids that failure mode.
+  domain: automation
+  author: ohlemacherd
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/charger-done-outlet-off.yaml
+  input:
+    plug_switch:
+      name: Smart plug
+      description: The switch entity that controls power to the charger.
+      selector:
+        entity:
+          filter:
+            - domain: switch
+    power_sensor:
+      name: Power sensor
+      description: >-
+        The plug's live power-draw sensor, in watts. Most energy-monitoring
+        smart plugs expose one alongside the switch entity.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: power
+    energy_today_sensor:
+      name: Today's energy sensor
+      description: >-
+        The plug's daily energy-total sensor (kWh). Only used to fill in
+        the notification text below - it plays no part in deciding when
+        the charge is done.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: energy
+    charging_flag:
+      name: Charging-session helper
+      description: >-
+        A Toggle helper dedicated to this automation (Settings -> Devices &
+        services -> Helpers -> Create helper -> Toggle). It remembers "a
+        real charge started" between the moment power first crosses the
+        charging threshold and the moment the charge is confirmed done, so
+        a short top-up on a partially-used battery still counts as a real
+        charge. Create one helper per plug this blueprint is used on -
+        don't share a single helper across more than one plug.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    charging_power_threshold:
+      name: Charging power threshold (W)
+      description: >-
+        Live draw above this many watts counts as "actively charging."
+        Set it comfortably above the device's idle/parasitic draw and
+        below its bulk-charge draw - check your power sensor's history
+        during a real charge to see where that gap sits.
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 500
+          step: 1
+          unit_of_measurement: W
+          mode: box
+    done_power_threshold:
+      name: Done power threshold (W)
+      description: >-
+        Once a charge has started, draw staying under this many watts for
+        the chosen number of minutes means the charger has dropped to
+        float/trickle and the charge is finished.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 500
+          step: 1
+          unit_of_measurement: W
+          mode: box
+    done_minutes:
+      name: Minutes under threshold before calling it done
+      description: >-
+        How long draw has to stay under the done threshold before the
+        plug switches off. Long enough to ride out a brief lull in
+        charging, short enough that a finished charger isn't left
+        trickling for hours.
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 240
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    enable_restore:
+      name: Turn the plug back on automatically?
+      description: >-
+        If off, the plug simply stays off once a charge is done, until
+        someone (or the plug's own button) turns it back on. If on, the
+        plug is switched back on automatically at the time below.
+      default: false
+      selector:
+        boolean: {}
+    restore_time:
+      name: Daily restore time
+      description: >-
+        Only used when "turn the plug back on automatically" is enabled
+        above. Harmless to fire even when nothing is plugged in.
+      default: "06:00:00"
+      selector:
+        time: {}
+    notify_service:
+      name: Notify service
+      description: >-
+        The notify service to call when the plug switches off, e.g.
+        notify.mobile_app_your_phone, or a notify group covering more than
+        one device. Leave the default (notify.notify) to get a Home
+        Assistant persistent notification instead of a push.
+      default: notify.notify
+      selector:
+        text: {}
+
+mode: single
+
+variables:
+  enable_restore: !input enable_restore
+  energy_today_sensor: !input energy_today_sensor
+
+triggers:
+  - trigger: numeric_state
+    entity_id: !input power_sensor
+    above: !input charging_power_threshold
+    id: charging_started
+  - trigger: numeric_state
+    entity_id: !input power_sensor
+    below: !input done_power_threshold
+    for:
+      minutes: !input done_minutes
+    id: charge_done
+  - trigger: time
+    at: !input restore_time
+    id: restore_time
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: charging_started
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input charging_flag
+      - conditions:
+          - condition: trigger
+            id: charge_done
+          - condition: state
+            entity_id: !input plug_switch
+            state: "on"
+          - condition: state
+            entity_id: !input charging_flag
+            state: "on"
+        sequence:
+          - action: switch.turn_off
+            target:
+              entity_id: !input plug_switch
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input charging_flag
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              title: Charger done - plug off
+              message: >-
+                {{ states(energy_today_sensor) }} kWh today, and draw has
+                stayed low for a while, so the plug is now off.
+      - conditions:
+          - condition: trigger
+            id: restore_time
+          - condition: template
+            value_template: "{{ enable_restore }}"
+          - condition: state
+            entity_id: !input plug_switch
+            state: "off"
+        sequence:
+          - action: switch.turn_on
+            target:
+              entity_id: !input plug_switch
