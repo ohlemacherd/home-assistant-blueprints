@@ -22,6 +22,8 @@ blueprint:
     Alert blueprint - recovering doesn't need to buzz a phone.
   domain: automation
   author: ohlemacherd
+  homeassistant:
+    min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/escalating-left-open-reminder.yaml
   input:
     target_entity:
@@ -79,8 +81,16 @@ blueprint:
           mode: box
     notify_service:
       name: Notify service
+      description: The Companion app service (notify.mobile_app_...) gets the escalating priority, the replacing banner and the auto-dismiss; any other notify service just gets three messages.
+      default: notify.persistent_notification
       selector:
         text: {}
+    companion_app:
+      name: Is the notify service the Companion app?
+      description: On (default): send the priority/tag/clear-banner extras. Off: plain messages only - a non-Companion service would otherwise show a literal "clear_notification".
+      default: true
+      selector:
+        boolean: {}
     notify_on_clear:
       name: Also push a notification when it clears?
       description: >-
@@ -94,6 +104,7 @@ mode: single
 
 variables:
   target_entity: !input target_entity
+  companion_app: !input companion_app
   state_word: !input state_word
   notify_on_clear: !input notify_on_clear
   stage1_minutes: !input stage1_minutes
@@ -119,9 +130,11 @@ triggers:
     for:
       minutes: !input stage3_minutes
     id: stage3
+  # Any way out of the bad state clears the banner - including the sensor
+  # dying - so a sticky stage-3 banner can never outlive the door.
   - trigger: state
     entity_id: !input target_entity
-    to: !input ok_state
+    from: !input bad_state
     id: cleared
 
 actions:
@@ -166,12 +179,16 @@ actions:
           - condition: trigger
             id: cleared
         sequence:
-          - action: !input notify_service
-            continue_on_error: true
-            data:
-              message: clear_notification
-              data:
-                tag: "left_open_{{ target_entity }}"
+          - if:
+              - condition: template
+                value_template: "{{ companion_app }}"
+            then:
+              - action: !input notify_service
+                continue_on_error: true
+                data:
+                  message: clear_notification
+                  data:
+                    tag: "left_open_{{ target_entity }}"
           - if:
               - condition: template
                 value_template: "{{ notify_on_clear }}"

@@ -16,7 +16,11 @@
 #     name: Goodnight
 #     icon: mdi:weather-night
 #     color: '#58aee2'
-#     tap_action: {action: call-service, service: script.goodnight}
+#     tap_action: {action: perform-action, perform_action: script.goodnight}
+#
+# A scene (scene.*) has no running state - wrap it in a script that calls
+# scene.turn_on and point the tile at the script. Dark palette (#1e1b15 card,
+# #f4f0e6 text): change those two values on a light theme.
 
 busy_button:
   show_state: false

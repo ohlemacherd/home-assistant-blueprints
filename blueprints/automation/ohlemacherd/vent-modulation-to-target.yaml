@@ -1,6 +1,9 @@
 blueprint:
   name: Vent/Register Modulation Against a Target
   description: >
+    Skip this one if you have no smart vents - it moves cover entities.
+
+
     Opens a room's smart vents/registers when the house's active heating or
     cooling would actually help that room, and closes them once the room is
     within a hysteresis band of its target. Does nothing while the system is
@@ -27,6 +30,8 @@ blueprint:
     idle is left alone entirely.
   domain: automation
   author: ohlemacherd
+  homeassistant:
+    min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml
   input:
     thermostat:
@@ -141,6 +146,7 @@ blueprint:
           mode: box
 
 mode: single
+max_exceeded: silent
 
 variables:
   thermostat: !input thermostat
@@ -154,13 +160,21 @@ variables:
   vents: !input vents
 
 triggers:
+  # not_to: a sensor going unavailable is not a temperature change, and must
+  # never be read as 0 (a 0 in heating would open every vent).
   - trigger: state
     entity_id: !input room_temp_sensor
+    not_to:
+      - unavailable
+      - unknown
     for:
       minutes: !input settle_minutes
     id: room_temp_change
   - trigger: state
     entity_id: !input target_temp_sensor
+    not_to:
+      - unavailable
+      - unknown
     id: target_change
   - trigger: state
     entity_id: !input thermostat
@@ -173,10 +187,13 @@ conditions:
       {{ state_attr(thermostat, 'hvac_action') in ['heating', 'cooling'] }}
 
 actions:
+  # Both numbers must be real numbers - never act on a default.
+  - condition: template
+    value_template: "{{ states(room_temp_sensor) | is_number and states(target_temp_sensor) | is_number }}"
   - variables:
       hvac_action: "{{ state_attr(thermostat, 'hvac_action') }}"
-      room_temp: "{{ states(room_temp_sensor) | float(0) }}"
-      target_temp: "{{ states(target_temp_sensor) | float(0) }}"
+      room_temp: "{{ states(room_temp_sensor) | float }}"
+      target_temp: "{{ states(target_temp_sensor) | float }}"
       diff: "{{ room_temp - target_temp }}"
       want_open: >-
         {{ (hvac_action == 'cooling' and diff > hysteresis) or
@@ -185,8 +202,9 @@ actions:
       # Every vent already at the wanted position -> nothing to send.
       already_there: >-
         {% set attr = 'current_tilt_position' if position_type == 'tilt' else 'current_position' %}
-        {{ expand(vents) | map(attribute='attributes.' ~ attr) | reject('none') | list | length == (expand(vents) | list | length)
-           and expand(vents) | map(attribute='attributes.' ~ attr) | map('int', -1) | reject('eq', value | int) | list | length == 0 }}
+        {% set vs = expand(vents) | selectattr('attributes.' ~ attr, 'defined') | list %}
+        {{ vs | length == (expand(vents) | list | length)
+           and vs | map(attribute='attributes.' ~ attr) | map('int', -1) | reject('eq', value | int) | list | length == 0 }}
   - condition: template
     value_template: "{{ not (skip_if_unchanged and already_there) }}"
   - choose:

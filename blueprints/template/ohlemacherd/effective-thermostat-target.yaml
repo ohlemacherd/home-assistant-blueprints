@@ -1,6 +1,10 @@
 blueprint:
   name: Effective Thermostat Target (Template Sensor)
   description: >
+    Only worth importing if an automation of yours reads the thermostat's
+    target - it is the companion to the vent-modulation blueprint.
+
+
     Creates one sensor: the temperature your thermostat is actually trying to
     hit right now, as a single plain number, no matter which of its modes
     (heat, cool, or heat_cool/auto) it happens to be in.
@@ -32,6 +36,8 @@ blueprint:
     input.
   domain: template
   author: ohlemacherd
+  homeassistant:
+    min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/template/ohlemacherd/effective-thermostat-target.yaml
   input:
     thermostat:
@@ -104,7 +110,7 @@ blueprint:
           step: 1
           mode: box
 
-trigger:
+triggers:
   - trigger: state
     entity_id: !input thermostat
   - trigger: homeassistant
@@ -120,12 +126,14 @@ variables:
 sensor:
   - name: !input sensor_name
     unit_of_measurement: !input unit
+    device_class: temperature
+    state_class: measurement
     icon: mdi:thermometer-check
     state: >
       {% set mode = states(thermostat) %}
       {% if mode in ['unavailable', 'unknown', 'none', ''] %}
         {{ fallback_value }}
-      {% elif mode == 'heat_cool' %}
+      {% elif mode in ['heat_cool', 'auto'] %}
         {% set side = 'target_temp_low' if state_attr(thermostat, 'hvac_action') == heating_action_value else 'target_temp_high' %}
         {% set t = state_attr(thermostat, side) | float(fallback_value) %}
         {{ t if low_clamp <= t <= high_clamp else fallback_value }}

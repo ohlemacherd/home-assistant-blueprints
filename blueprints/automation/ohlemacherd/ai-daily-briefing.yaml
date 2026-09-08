@@ -26,6 +26,8 @@ blueprint:
     prompt - that single feedback loop is what makes it feel like it learns.
   domain: automation
   author: ohlemacherd
+  homeassistant:
+    min_version: 2025.7.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/ai-daily-briefing.yaml
   input:
     ai_task:
@@ -179,6 +181,7 @@ blueprint:
           mode: box
 
 mode: single
+max_exceeded: silent
 
 variables:
   ai_task: !input ai_task
@@ -263,7 +266,7 @@ actions:
         {% if todos is defined and todo_list in todos %}
           {% for it in (todos[todo_list]['items'] | default([])) %}
             {% if it.due is defined and it.due %}
-              {% set ns.l = ns.l + [(it.due | string)[:10] ~ ' ' ~ it.summary] %}
+              {% set ns.l = ns.l + [(it.due | string)[:10] ~ ' ' ~ (it.summary | default('') | string)] %}
             {% endif %}
           {% endfor %}
         {% endif %}
@@ -278,7 +281,7 @@ actions:
       steer: >-
         {{ states(steer_helper) if steer_helper != '' and states(steer_helper) not in ['unknown', 'unavailable', ''] else '' }}
       instructions: >-
-        You write a short daily briefing for {{ audience }}. It is {{ daypart }} on {{ now().strftime('%A %B %-d') }}.
+        You write a short daily briefing for {{ audience }}. It is {{ daypart }} on {{ now().strftime('%A %B') }} {{ now().day }}.
         {% if daypart == 'evening' %}Frame it as a preview of tomorrow with anything still relevant tonight.{% endif %}
 
         STANDING RULES (obey them over any instinct to be thorough):
@@ -323,7 +326,7 @@ actions:
         headline:
           description: One short clause, max 90 characters, no greeting, no trailing period.
           selector:
-            text:
+            text: {}
         briefing:
           description: 2-4 sentences of judgment addressed to the household. No lists. Must not restate the headline.
           selector:
@@ -360,7 +363,7 @@ actions:
             headline:
               description: One short clause, max 90 characters, no greeting, no trailing period.
               selector:
-                text:
+                text: {}
             briefing:
               description: 2-4 sentences of judgment addressed to the household. No lists. Must not restate the headline.
               selector:
@@ -380,44 +383,49 @@ actions:
       - variables:
           brief: "{{ brief_alt if (brief_alt is defined and brief_alt.data is defined) else brief }}"
           backend: fallback
-  # ---- shape the output
-  - variables:
-      head: "{{ ((brief.data.headline | default('', true) | string | trim)[:90]) if (brief is defined and brief.data is defined) else '' }}"
-      body: "{{ (brief.data.briefing | default('', true) | string | trim) if (brief is defined and brief.data is defined) else '' }}"
-      today_b: "{{ ((brief.data.today_bullets | default([], true)) | list)[:(max_bullets | int)] if (brief is defined and brief.data is defined) else [] }}"
-      ahead_b: "{{ ((brief.data.look_ahead | default([], true)) | list)[:4] if (brief is defined and brief.data is defined) else [] }}"
-  - if:
-      - condition: template
-        value_template: "{{ headline_helper != '' }}"
-    then:
-      - action: input_text.set_value
-        continue_on_error: true
-        target:
-          entity_id: "{{ headline_helper }}"
-        data:
-          value: "{{ head[:255] }}"
-  - event: ai_daily_briefing
-    event_data:
-      headline: "{{ head }}"
-      briefing: "{{ body }}"
-      today: "{{ today_b }}"
-      look_ahead: "{{ ahead_b }}"
-      daypart: "{{ daypart }}"
-      backend: "{{ backend }}"
-  # Silence is a valid output: an empty result sends nothing.
-  - if:
-      - condition: template
-        value_template: "{{ head != '' or body != '' }}"
-    then:
-      - action: "{{ notify_service }}"
-        continue_on_error: true
-        data:
-          title: "{{ head if head else 'Today' }}"
-          message: >-
-            {{ body }}{% if today_b | count > 0 %}
+      # Variables assigned inside this branch stay in it (HA 2024.10+ block
+      # scoping), so the output is shaped and delivered right here; the
+      # else-branch runs the identical steps through the YAML alias.
+      - sequence: &deliver
+          - variables:
+              head: "{{ ((brief.data.headline | default('', true) | string | trim)[:90]) if (brief is defined and brief.data is defined) else '' }}"
+              body: "{{ (brief.data.briefing | default('', true) | string | trim) if (brief is defined and brief.data is defined) else '' }}"
+              today_b: "{{ ((brief.data.today_bullets | default([], true)) | list)[:(max_bullets | int)] if (brief is defined and brief.data is defined) else [] }}"
+              ahead_b: "{{ ((brief.data.look_ahead | default([], true)) | list)[:4] if (brief is defined and brief.data is defined) else [] }}"
+          - if:
+              - condition: template
+                value_template: "{{ headline_helper != '' }}"
+            then:
+              - action: input_text.set_value
+                continue_on_error: true
+                target:
+                  entity_id: "{{ headline_helper }}"
+                data:
+                  value: "{{ head[:255] }}"
+          - event: ai_daily_briefing
+            event_data:
+              headline: "{{ head }}"
+              briefing: "{{ body }}"
+              today: "{{ today_b }}"
+              look_ahead: "{{ ahead_b }}"
+              daypart: "{{ daypart }}"
+              backend: "{{ backend }}"
+          # Silence is a valid output: an empty result sends nothing.
+          - if:
+              - condition: template
+                value_template: "{{ head != '' or body != '' }}"
+            then:
+              - action: "{{ notify_service }}"
+                continue_on_error: true
+                data:
+                  title: "{{ head if head else 'Today' }}"
+                  message: >-
+                    {{ body }}{% if today_b | count > 0 %}
 
-            {% for b in today_b %}• {{ b }}
-            {% endfor %}{% endif %}{% if ahead_b | count > 0 %}
-            Looking ahead:
-            {% for b in ahead_b %}• {{ b }}
-            {% endfor %}{% endif %}
+                    {% for b in today_b %}• {{ b }}
+                    {% endfor %}{% endif %}{% if ahead_b | count > 0 %}
+                    Looking ahead:
+                    {% for b in ahead_b %}• {{ b }}
+                    {% endfor %}{% endif %}
+    else:
+      - sequence: *deliver

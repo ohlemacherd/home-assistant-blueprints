@@ -4,8 +4,7 @@ Not blueprints - these are the pieces of a Lovelace dashboard that turned out
 to be reusable, and the platform facts I had to learn by measuring. The whole
 dashboard is a `sections` layout driven by
 [button-card](https://github.com/custom-cards/button-card) templates and a few
-`custom:mushroom-*` cards. It runs on a kiosked Pixel Tablet on the kitchen
-counter (1280x800 CSS at DPR 2) and on phones.
+`custom:mushroom-*` cards. It runs on a kiosked 1280x800 tablet and on phones.
 
 The two templates in [`dashboard/templates/`](../dashboard/templates/) drop
 into any button-card setup. Everything below them is the reasoning.
@@ -60,8 +59,7 @@ recommendations, which is the same as none.
 
 ## 4. Five things the sections engine will not tell you
 
-Every one of these cost me an evening. Measured on a real browser against the
-live dashboard, not reasoned about.
+Measured on a real browser against a live dashboard, not reasoned about.
 
 1. **There is no view-level `zoom`.** `card_mod` at view level is a silent
    no-op on `type: sections` views (`hui-sections-view` is not what it

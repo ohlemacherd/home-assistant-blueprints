@@ -25,8 +25,15 @@ blueprint:
     when nothing meaningful was plugged in. Tracking whether real charging
     *current* was ever seen this cycle, rather than how much energy it took,
     avoids that failure mode.
+
+
+    Known limit: the "done" timer restarts if the plug's power sensor drops
+    to unavailable mid-charge (a Wi-Fi blip); the plug just stays on until
+    the next quiet 30 minutes.
   domain: automation
   author: ohlemacherd
+  homeassistant:
+    min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/charger-done-outlet-off.yaml
   input:
     plug_switch:
@@ -154,6 +161,8 @@ mode: single
 variables:
   enable_restore: !input enable_restore
   energy_today_sensor: !input energy_today_sensor
+  charging_power_threshold: !input charging_power_threshold
+  done_power_threshold: !input done_power_threshold
 
 triggers:
   - trigger: numeric_state
@@ -188,6 +197,9 @@ actions:
           - condition: state
             entity_id: !input charging_flag
             state: "on"
+          # Inverted thresholds would make both triggers fire on one reading.
+          - condition: template
+            value_template: "{{ (done_power_threshold | float) < (charging_power_threshold | float) }}"
         sequence:
           - action: switch.turn_off
             target:

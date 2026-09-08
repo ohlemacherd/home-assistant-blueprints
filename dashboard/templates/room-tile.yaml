@@ -23,8 +23,11 @@
 # toggle helper or delete the two references to it.
 #
 # Colours: green within 1.5 degrees of target, amber past that, red 3+ warm,
-# blue 3+ cold, grey when the sensor is unavailable. Change the four RGB
-# triples in `colour()` to retheme.
+# blue 3+ cold, grey when the sensor is unavailable. THIS IS A DARK PALETTE
+# (card #1e1b15, text #f4f0e6): on a light theme, change those two hex values
+# and the four RGB triples used for the colour bands. The detailed layer is
+# decided by a media query at render time, so a rotated tablet keeps the old
+# layer until the next state update - a known limit.
 
 room_tile:
   show_state: false
@@ -39,7 +42,7 @@ room_tile:
     chip: |
       [[[
         const icon = variables.room_icon || 'mdi:home';
-        const t = parseFloat(entity.state);
+        const t = entity ? parseFloat(entity.state) : NaN;
         const te = variables.target_entity ? states[variables.target_entity] : null;
         const target = (te && !isNaN(parseFloat(te.state))) ? parseFloat(te.state) : variables.fallback_target;
         const d = t - target;
@@ -56,7 +59,7 @@ room_tile:
       ]]]
     body: |-
       [[[
-        const t = parseFloat(entity.state);
+        const t = entity ? parseFloat(entity.state) : NaN;
         const te = variables.target_entity ? states[variables.target_entity] : null;
         const target = (te && !isNaN(parseFloat(te.state))) ? parseFloat(te.state) : variables.fallback_target;
         const d = t - target;
@@ -108,7 +111,7 @@ room_tile:
     - border: 1px solid rgba(245,240,230,0.06)
     - background: |
         [[[
-          const t = parseFloat(entity.state);
+          const t = entity ? parseFloat(entity.state) : NaN;
           const te = variables.target_entity ? states[variables.target_entity] : null;
           const target = (te && !isNaN(parseFloat(te.state))) ? parseFloat(te.state) : variables.fallback_target;
           const d = t - target;

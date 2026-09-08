@@ -23,8 +23,15 @@ blueprint:
     you actually have is a raw number (bytes received, response time, and
     so on), turn it into a binary/problem sensor first - a Template or
     Threshold helper, a Statistics/Trend helper - and point this at that.
+
+
+    Known limit: the confirmation timers do not survive a Home Assistant
+    restart, so something that was already down across a restart is noticed
+    the next time it changes state, not immediately.
   domain: automation
   author: ohlemacherd
+  homeassistant:
+    min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/debounced-outage-alert.yaml
   input:
     health_entity:
@@ -93,7 +100,8 @@ blueprint:
             - domain: input_boolean
     notify_service:
       name: Notify service (down alert)
-      description: e.g. notify.mobile_app_your_phone, or a notify group.
+      description: e.g. notify.mobile_app_your_phone, or a notify group. The default is built in and shows under Settings -> Notifications.
+      default: notify.persistent_notification
       selector:
         text: {}
     notify_on_recovery:
@@ -123,9 +131,13 @@ triggers:
     for:
       minutes: !input confirm_minutes
     id: down
+  # unavailable -> unknown is not a recovery.
   - trigger: state
     entity_id: !input health_entity
     from: !input down_state
+    not_to:
+      - unknown
+      - unavailable
     for:
       minutes: !input recover_minutes
     id: recovered
@@ -154,7 +166,7 @@ actions:
           - condition: trigger
             id: recovered
           - condition: template
-            value_template: "{{ states(health_entity) != down_state }}"
+            value_template: "{{ states(health_entity) not in [down_state, 'unknown', 'unavailable'] }}"
           - condition: state
             entity_id: !input paged_flag
             state: "on"

@@ -7,6 +7,17 @@ people in the house don't spend attention on them. Around it: the
 automations that fell out of building that house, generalized. A hobby
 side-project, not a supported product - see "Honest expectations" below.
 
+## If you're new to this
+
+- A **blueprint** is a ready-made automation with the entity names left blank; you import it once and fill in the blanks from dropdowns. No YAML editing.
+- An **entity** is anything Home Assistant can see or control - `switch.garage_plug`, `sensor.garage_plug_power`, `binary_sensor.front_door`.
+- An **integration** is what connects a brand or protocol - TP-Link for Kasa plugs, Hue for Hue devices. *Core* integrations come with Home Assistant; *HACS* is a separate community store you install first (hacs.xyz).
+- A **helper** is a small entity you create yourself under Settings -> Devices & services -> Helpers: a Toggle (on/off memory), a Counter, a Text box. Two of the blueprints below ask you to create one first; it takes 30 seconds.
+- A **notify service** is where a message goes - `notify.mobile_app_<your phone>` if you have the Companion app, or `notify.persistent_notification` (built in, shows under Settings -> Notifications).
+- **If an entity doesn't appear in a dropdown**, the input is filtered by device class (a power sensor, a contact sensor) and yours isn't tagged that way - set it under the entity's settings (the gear icon) and it will show up.
+
+Tested on Home Assistant 2026.9. Each blueprint declares the oldest version it needs (2024.10 for the modern syntax; the AI briefing needs 2025.7 for AI Task).
+
 ## Importing
 
 Each blueprint below has an **Import** button that opens your own Home
@@ -34,7 +45,7 @@ most people can use today; the bottom needs specific hardware.
 | 4 | [Device Watchdog with Optional Auto Power-Cycle](#device-watchdog-with-optional-auto-power-cycle) | Automation | The 'pull the plug and put it back' fix, automated - with a daily cap so a dead device can't loop. Any smart plug. |
 | 5 | [Escalating Left-Open Reminder](#escalating-left-open-reminder) | Automation | Common need, but the 1/5/15 escalation with one replacing banner is what makes it usable. Any contact sensor. |
 | 6 | [Effective Thermostat Target (Template Sensor)](#effective-thermostat-target-template-sensor) | Template sensor | Nobody else has it, but you only need it if a climate entity's mode-dependent target attributes have bitten you. |
-| 7 | [Vent/Register Modulation Against a Target](#ventregister-modulation-against-a-target) | Automation | Unique, but needs smart vents plus a thermostat with hvac_action - the narrowest audience here. |
+| 7 | [Vent/Register Modulation Against a Target](#ventregister-modulation-against-a-target) | Automation | Unique, but needs smart vents plus a thermostat with hvac_action - the narrowest audience here. Skip 6 and 7 if you have no smart vents. |
 
 ## What each one needs
 
@@ -417,7 +428,7 @@ Template a sensor**, then choose "use a blueprint."
 |---|---|
 | **What's in it for me** | Hot and cold rooms even out without the vent vendor's cloud writing your thermostat behind your back, and battery vents stop chattering (one guest room went from 204 moves a day to single digits). |
 | **What I need** | Smart vents with `cover` entities (Flair via its HACS integration), a temperature sensor in each room, a thermostat with `hvac_action`, and a target sensor (the template blueprint above). One instance per room. |
-| **Effort** | **Medium** - 15 minutes per room, then a week of watching move counts and adjusting the hysteresis. |
+| **Effort** | **Medium for the blueprint** - 15 minutes per room, then a week of watching move counts and adjusting the hysteresis. The hardware side (vents, pucks, per-room sensors) is a weekend, not a blueprint. |
 | **Cost - required** | **Smart vents, $70-100 each** for the rooms you want to control, plus a smart thermostat (above) if you have none. |
 | **Cost - optional** | A per-room temperature sensor if the vent kit doesn't include one, $20-100 (a Zigbee sensor at the low end, a vendor puck at the high). Extra pucks for rooms without vents. |
 
@@ -473,6 +484,10 @@ an evening to learn. Paste a template under `button_card_templates:` and follow 
 the top of each file.
 
 ---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md). Blueprints import from `main`; the changelog says when one changed behaviour.
 
 ## Honest expectations
 

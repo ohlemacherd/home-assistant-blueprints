@@ -21,9 +21,14 @@ blueprint:
 
 
     Auto power-cycling is opt-in and off by default. Leave it off to use
-    this purely as a "single point of failure went offline" notifier.
+    this purely as a "single point of failure went offline" notifier. One
+    power-cycle per continuous outage: if the device is still down after
+    the cycle, you already have the notification, and the daily cap is the
+    guard across repeated outages in one day.
   domain: automation
   author: ohlemacherd
+  homeassistant:
+    min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/device-watchdog-power-cycle.yaml
   input:
     watched_entities:
@@ -83,6 +88,8 @@ blueprint:
             - domain: input_boolean
     notify_service:
       name: Notify service
+      description: The default is built in and shows under Settings -> Notifications.
+      default: notify.persistent_notification
       selector:
         text: {}
     enable_auto_cycle:
@@ -91,11 +98,9 @@ blueprint:
       selector:
         boolean: {}
     power_plug:
-      name: Smart plug powering the device
-      description: >-
-        Only acted on when auto power-cycle above is enabled. Still pick
-        any switch entity if you're leaving that feature off - it's never
-        touched.
+      name: Smart plug powering the device (optional)
+      description: Only acted on when auto power-cycle above is enabled. Leave empty otherwise.
+      default: ""
       selector:
         entity:
           filter:
@@ -124,13 +129,13 @@ blueprint:
           unit_of_measurement: seconds
           mode: box
     cycle_counter:
-      name: Daily power-cycle counter
+      name: Daily power-cycle counter (optional)
       description: >-
         A Counter helper dedicated to this automation (Settings -> Devices
-        & services -> Helpers -> Create helper -> Counter). Only used when
-        auto power-cycle is enabled; reset to 0 automatically every midnight
-        by this same automation. Still pick any Counter helper if you're
-        leaving auto power-cycle off.
+        & services -> Helpers -> Create helper -> Counter), created with an
+        initial value of 0. Only used when auto power-cycle is enabled; set
+        back to 0 every midnight by this automation. Leave empty otherwise.
+      default: ""
       selector:
         entity:
           filter:
@@ -150,7 +155,10 @@ blueprint:
           step: 1
           mode: box
 
-mode: single
+# queued: a recovery that lands during the power-cycle delay must not be dropped.
+mode: queued
+max: 5
+max_exceeded: silent
 
 trigger_variables:
   watched_entities: !input watched_entities
@@ -227,7 +235,7 @@ actions:
             id: cycle_time
           - condition: template
             value_template: >-
-              {{ enable_auto_cycle and power_plug and cycle_counter and (states(cycle_counter) | int(0)) < max_cycles_per_day }}
+              {{ enable_auto_cycle and power_plug != '' and cycle_counter != '' and (states(cycle_counter) | int(0)) < max_cycles_per_day }}
         sequence:
           - action: !input notify_service
             continue_on_error: true
@@ -235,22 +243,28 @@ actions:
               title: "{{ label }} still down - power-cycling"
               message: >-
                 Still unreachable after the longer window, so the plug is
-                being power-cycled automatically ({{ (states(cycle_counter) | int(0)) + 1 }} of {{ max_cycles_per_day }} today).
+                being power-cycled automatically (cycle {{ (states(cycle_counter) | int(0)) + 1 }} of {{ max_cycles_per_day }} allowed today; one per outage).
           - action: counter.increment
             target:
-              entity_id: !input cycle_counter
+              entity_id: "{{ cycle_counter }}"
           - action: switch.turn_off
             target:
-              entity_id: !input power_plug
+              entity_id: "{{ power_plug }}"
           - delay:
               seconds: "{{ off_seconds }}"
           - action: switch.turn_on
             target:
-              entity_id: !input power_plug
+              entity_id: "{{ power_plug }}"
       - conditions:
           - condition: trigger
             id: midnight_reset
+          - condition: template
+            value_template: "{{ cycle_counter != '' }}"
         sequence:
-          - action: counter.reset
+          # set_value, not reset: reset returns to the helper's initial value, which
+          # is only 0 if it was created that way.
+          - action: counter.set_value
             target:
-              entity_id: !input cycle_counter
+              entity_id: "{{ cycle_counter }}"
+            data:
+              value: 0
