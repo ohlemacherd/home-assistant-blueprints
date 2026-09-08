@@ -7,6 +7,9 @@ it - or steal the idea for hardware you already have. None of these are
 blueprints (yet); where one is, it's linked. Ask in an issue if you want one
 turned into a blueprint and I'll see whether it survives generalizing.
 
+Also: [the hard-won ones](hard-won.md) - which of these took the most
+troubleshooting to make useful, measured, with the lesson each one taught.
+
 ## The big engines (each one is many automations)
 
 Before the hardware list: five systems in this house are not one automation

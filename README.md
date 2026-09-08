@@ -39,6 +39,7 @@ most people can use today; the bottom needs specific hardware.
 Also in the repo, not blueprints:
 
 - [More ideas, by the hardware they need](docs/ideas-by-hardware.md) - everything else that runs in the same house, grouped by the device it depends on, so you can see what a purchase would unlock (or steal the idea for hardware you already have).
+- [The hard-won ones](docs/hard-won.md) - the fifteen automations that had to be fixed the most times (measured: dated revisions in their own descriptions), each with the lesson it finally taught. If you build one thing from here, build the thing whose failure modes are already written down.
 - [The HVAC engine](docs/hvac-engine.md) - one thermostat, six smart vents, ~30 automations in seven layers, and the lessons (the 212°F sensor morning, the guard that called its own write "manual", the pull chain software can't see).
 - [Dashboard patterns](docs/dashboard-patterns.md) + two [button-card templates](dashboard/templates/) - a room tile that reads as a heat map, a scene tile that shows it's working, and five measured facts about the sections engine.
 - [Building an AI daily briefing on top of Home Assistant](docs/ai-briefing-writeup.md) - the shape of a scheduled-process + LLM + notify-service briefing and the judgment calls that made it useful.
