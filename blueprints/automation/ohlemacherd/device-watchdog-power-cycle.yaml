@@ -1,0 +1,256 @@
+blueprint:
+  name: Device Watchdog with Optional Auto Power-Cycle
+  description: >
+    For a single point of failure that lives on a smart plug - a hub or
+    bridge, a Raspberry Pi, a Wi-Fi extender, anything where "someone
+    physically pulls the plug and puts it back" is the known fix for it
+    going deaf. Watches one or more entities that only report data when the
+    device is actually reachable. When enough of them go unavailable for a
+    confirmation window, it notifies once (not once per flapping entity).
+    If the outage keeps going past a second, longer window, it can
+    optionally power-cycle the device itself through a smart plug - off,
+    a short pause, back on - and notify that it did so.
+
+
+    Two safety rails, both load-bearing: a daily cap on auto power-cycles
+    (a Counter helper you create, reset automatically at midnight), so a
+    device that is genuinely dead - unplugged, broken, off Wi-Fi for a real
+    reason - gets you a notification instead of being power-cycled forever;
+    and the outage only has to be announced once, the moment it's confirmed,
+    not re-announced every time this automation re-evaluates.
+
+
+    Auto power-cycling is opt-in and off by default. Leave it off to use
+    this purely as a "single point of failure went offline" notifier.
+  domain: automation
+  author: ohlemacherd
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/device-watchdog-power-cycle.yaml
+  input:
+    watched_entities:
+      name: Entities to watch
+      description: >-
+        Entities that go unavailable when this device is unreachable - its
+        own connectivity/diagnostic entities if it has any, or a handful of
+        entities you know depend on it (lights on the same Zigbee bridge,
+        sensors that come from the same Pi, and so on).
+      selector:
+        entity:
+          multiple: true
+    unavailable_state:
+      name: "\"Unreachable\" state"
+      default: unavailable
+      selector:
+        text: {}
+    required_down_count:
+      name: How many must be down at once
+      description: >-
+        Requires at least this many of the watched entities to be down
+        simultaneously before it counts - guards against one entity's own
+        battery/wiring problem being mistaken for the whole device being
+        down. Set to 1 if you're only watching a single dedicated
+        connectivity entity.
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 1
+          mode: box
+    confirm_minutes:
+      name: Minutes down before the first notification
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 240
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    label:
+      name: What to call this device in notifications
+      description: 'e.g. "Zigbee bridge", "Garage Pi".'
+      selector:
+        text: {}
+    notified_flag:
+      name: "\"Already notified\" helper"
+      description: >-
+        A Toggle helper dedicated to this automation (Settings -> Devices &
+        services -> Helpers -> Create helper -> Toggle). One per instance of
+        this blueprint - don't share it across more than one watched device.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    notify_service:
+      name: Notify service
+      selector:
+        text: {}
+    enable_auto_cycle:
+      name: Automatically power-cycle after the second window?
+      default: false
+      selector:
+        boolean: {}
+    power_plug:
+      name: Smart plug powering the device
+      description: >-
+        Only acted on when auto power-cycle above is enabled. Still pick
+        any switch entity if you're leaving that feature off - it's never
+        touched.
+      selector:
+        entity:
+          filter:
+            - domain: switch
+    auto_cycle_after_minutes:
+      name: Minutes down before an auto power-cycle
+      description: >-
+        Should be comfortably longer than the first-notification window
+        above, to give the device a chance to recover on its own first.
+      default: 30
+      selector:
+        number:
+          min: 2
+          max: 720
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    off_seconds:
+      name: Seconds to leave the plug off
+      default: 10
+      selector:
+        number:
+          min: 3
+          max: 120
+          step: 1
+          unit_of_measurement: seconds
+          mode: box
+    cycle_counter:
+      name: Daily power-cycle counter
+      description: >-
+        A Counter helper dedicated to this automation (Settings -> Devices
+        & services -> Helpers -> Create helper -> Counter). Only used when
+        auto power-cycle is enabled; reset to 0 automatically every midnight
+        by this same automation. Still pick any Counter helper if you're
+        leaving auto power-cycle off.
+      selector:
+        entity:
+          filter:
+            - domain: counter
+    max_cycles_per_day:
+      name: Max auto power-cycles per day
+      description: >-
+        Once this many auto power-cycles have happened today, this
+        automation keeps notifying on the outage but stops power-cycling -
+        a device still down after this many tries is not fixed by
+        power-cycling it again.
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          mode: box
+
+mode: single
+
+trigger_variables:
+  watched_entities: !input watched_entities
+  unavailable_state: !input unavailable_state
+  required_down_count: !input required_down_count
+
+triggers:
+  - trigger: template
+    value_template: >-
+      {{ (expand(watched_entities) | selectattr('state', 'eq', unavailable_state) | list | count) >= required_down_count }}
+    for:
+      minutes: !input confirm_minutes
+    id: down_confirmed
+  - trigger: template
+    value_template: >-
+      {{ (expand(watched_entities) | selectattr('state', 'eq', unavailable_state) | list | count) >= required_down_count }}
+    for:
+      minutes: !input auto_cycle_after_minutes
+    id: cycle_time
+  - trigger: template
+    value_template: >-
+      {{ (expand(watched_entities) | selectattr('state', 'eq', unavailable_state) | list | count) < required_down_count }}
+    id: recovered
+  - trigger: time
+    at: "00:00:00"
+    id: midnight_reset
+
+conditions: []
+
+actions:
+  - variables:
+      label: !input label
+      notified_flag: !input notified_flag
+      enable_auto_cycle: !input enable_auto_cycle
+      power_plug: !input power_plug
+      off_seconds: !input off_seconds
+      cycle_counter: !input cycle_counter
+      max_cycles_per_day: !input max_cycles_per_day
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: down_confirmed
+          - condition: state
+            entity_id: !input notified_flag
+            state: "off"
+        sequence:
+          - action: input_boolean.turn_on
+            target:
+              entity_id: !input notified_flag
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              title: "{{ label }} is unreachable"
+              message: >-
+                {{ label }} has looked offline for a while now. You won't
+                hear about this outage again until it recovers.
+      - conditions:
+          - condition: trigger
+            id: recovered
+          - condition: state
+            entity_id: !input notified_flag
+            state: "on"
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input notified_flag
+          - action: persistent_notification.create
+            data:
+              title: "{{ label }} is back"
+              message: "{{ label }} recovered after an outage."
+              notification_id: "watchdog_recovered_{{ label }}"
+      - conditions:
+          - condition: trigger
+            id: cycle_time
+          - condition: template
+            value_template: >-
+              {{ enable_auto_cycle and power_plug and cycle_counter and (states(cycle_counter) | int(0)) < max_cycles_per_day }}
+        sequence:
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              title: "{{ label }} still down - power-cycling"
+              message: >-
+                Still unreachable after the longer window, so the plug is
+                being power-cycled automatically ({{ (states(cycle_counter) | int(0)) + 1 }} of {{ max_cycles_per_day }} today).
+          - action: counter.increment
+            target:
+              entity_id: !input cycle_counter
+          - action: switch.turn_off
+            target:
+              entity_id: !input power_plug
+          - delay:
+              seconds: "{{ off_seconds }}"
+          - action: switch.turn_on
+            target:
+              entity_id: !input power_plug
+      - conditions:
+          - condition: trigger
+            id: midnight_reset
+        sequence:
+          - action: counter.reset
+            target:
+              entity_id: !input cycle_counter
