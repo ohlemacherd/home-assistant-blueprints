@@ -25,7 +25,6 @@ blueprint:
     mentioning the trash", "lead with the kids' schedule") without editing a
     prompt - that single feedback loop is what makes it feel like it learns.
   domain: automation
-  author: ohlemacherd
   homeassistant:
     min_version: 2025.7.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/ai-daily-briefing.yaml

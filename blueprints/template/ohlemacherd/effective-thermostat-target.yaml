@@ -35,7 +35,6 @@ blueprint:
     blueprint in this repo: feed this sensor in as its target-temperature
     input.
   domain: template
-  author: ohlemacherd
   homeassistant:
     min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/template/ohlemacherd/effective-thermostat-target.yaml

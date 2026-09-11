@@ -26,7 +26,6 @@ blueprint:
     the cycle, you already have the notification, and the daily cap is the
     guard across repeated outages in one day.
   domain: automation
-  author: ohlemacherd
   homeassistant:
     min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/device-watchdog-power-cycle.yaml

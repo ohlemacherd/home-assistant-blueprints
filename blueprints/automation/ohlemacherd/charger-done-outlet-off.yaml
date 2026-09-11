@@ -31,7 +31,6 @@ blueprint:
     to unavailable mid-charge (a Wi-Fi blip); the plug just stays on until
     the next quiet 30 minutes.
   domain: automation
-  author: ohlemacherd
   homeassistant:
     min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/charger-done-outlet-off.yaml

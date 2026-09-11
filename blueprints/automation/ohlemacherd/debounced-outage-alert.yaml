@@ -29,7 +29,6 @@ blueprint:
     restart, so something that was already down across a restart is noticed
     the next time it changes state, not immediately.
   domain: automation
-  author: ohlemacherd
   homeassistant:
     min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/debounced-outage-alert.yaml

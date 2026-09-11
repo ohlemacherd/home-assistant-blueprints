@@ -29,7 +29,6 @@ blueprint:
     air gets diverted to rooms that still need it. The system being off or
     idle is left alone entirely.
   domain: automation
-  author: ohlemacherd
   homeassistant:
     min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/vent-modulation-to-target.yaml
