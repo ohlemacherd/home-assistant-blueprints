@@ -352,8 +352,7 @@ Any entity with a "bad" and "ok" state - typically a `binary_sensor`
 | Input | What it is |
 |---|---|
 | **Entity to watch** | The sensor to monitor. |
-| **"Left open/on" state** | Default `on`. |
-| **"Cleared" state** | Default `off`. |
+| **"Left open/on" state** | Default `on`. The banner clears on any transition away from this state (unavailable included), not only to a specific "cleared" value. |
 | **Word describing the bad state** | e.g. "open," "running," "on" - used in notification text. |
 | **Stage 1/2/3 delay (minutes)** | Defaults 1 / 5 / 15. |
 | **Notify service** | Where the alerts go. |

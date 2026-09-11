@@ -21,7 +21,6 @@ blueprint:
     default, matching the same reasoning as this repo's Debounced Outage
     Alert blueprint - recovering doesn't need to buzz a phone.
   domain: automation
-  author: ohlemacherd
   homeassistant:
     min_version: 2024.10.0
   source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/escalating-left-open-reminder.yaml
@@ -36,12 +35,12 @@ blueprint:
         entity: {}
     bad_state:
       name: "\"Left open/on\" state"
+      description: >-
+        The banner clears on any transition away from this state (not only
+        to a specific "cleared" value) - including the entity going
+        unavailable - so a sticky stage-3 banner can never outlive the
+        door.
       default: "on"
-      selector:
-        text: {}
-    ok_state:
-      name: "\"Cleared\" state"
-      default: "off"
       selector:
         text: {}
     state_word:
@@ -91,9 +90,13 @@ blueprint:
     companion_app:
       name: Is the notify service the Companion app?
       description: >-
-        On (default) sends the priority / tag / clear-banner extras. Off sends
-        plain messages only - a non-Companion service would otherwise show a
-        literal "clear_notification".
+        Controls only the auto-dismiss on clear. On (default), clearing sends
+        the Companion app's clear_notification message so the banner
+        disappears on its own. Off skips that step - a non-Companion service
+        would otherwise show a literal "clear_notification" as if it were a
+        real message. The priority/tag/sticky fields on stages 1-3 are always
+        included; a non-Companion notify service that doesn't understand them
+        just ignores them.
       default: true
       selector:
         boolean: {}
@@ -180,6 +183,7 @@ actions:
               data:
                 priority: high
                 ttl: 0
+                sticky: "true"
                 tag: "left_open_{{ target_entity }}"
       - conditions:
           - condition: trigger
