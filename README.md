@@ -83,20 +83,22 @@ Also in the repo:
 
 | At a glance | |
 |---|---|
-| **What's in it for me** | One paragraph a day that makes the small decisions - what matters today, what can wait, what needs a nudge before an event - so nobody in the house merges five apps in their head at 6:30am. A one-line steer box so it learns your household in a week. |
 | **What I need** | An AI Task entity (any provider, core integration) and at least one calendar. Optional: a to-do list, two `input_text` helpers (steer, headline), a second provider for failover, the Companion app for push. |
 | **Effort** | **Medium** - 20 min to import and pick entities, then a week of one-line steers until it reads right. No YAML. |
 | **Cost - required** | **$0 hardware.** LLM calls: roughly **$1-3 / month** on a cheap model (one call a day), **$0** with a local Ollama model. |
 | **Cost - optional** | A wall tablet to read it on, $100-400. Nabu Casa not needed. |
 
-Once a day (or twice), gathers what the house actually knows - the calendars
-the household can act on, a to-do list (dated items only), any sensor states
-you name - and hands it to an AI Task entity with a short set of judgment
-rules. Back comes a briefing shaped like a person wrote it: one headline, two
-to four sentences of judgment, a few noun-first bullets for today, a short
-radar for the weeks ahead. Delivered wherever you point it; the headline can
-also land in an `input_text` for a dashboard strip, and the whole thing fires
-as an event for anything else to pick up.
+Once a day (or twice), makes the small decisions for the house - what matters
+today, what can wait, what needs a nudge before an event - so nobody merges
+five apps in their head at 6:30am. It gathers what the house actually knows -
+the calendars the household can act on, a to-do list (dated items only), any
+sensor states you name - and hands it to an AI Task entity with a short set of
+judgment rules. Back comes a briefing shaped like a person wrote it: one
+headline, two to four sentences of judgment, a few noun-first bullets for
+today, a short radar for the weeks ahead. Delivered wherever you point it; the
+headline can also land in an `input_text` for a dashboard strip, and the whole
+thing fires as an event for anything else to pick up. A one-line steer box
+means it learns your household in a week.
 
 ### Why this is the one that matters
 
@@ -143,16 +145,17 @@ and it's what makes the thing feel like it learns.
 
 | At a glance | |
 |---|---|
-| **What's in it for me** | Batteries on dumb chargers stop being cooked on float for a week at a time - a ride-on pack, e-bike or drill battery lasts years instead of a season - and nobody has to remember to unplug anything. |
 | **What I need** | A power-monitoring smart plug (switch + live watts + today's kWh) and one Toggle helper. A notify service if you want to hear about it. |
 | **Effort** | **Low** - 10 minutes. Glance at the plug's power graph during one real charge to confirm the 15 W / 5 W thresholds. |
 | **Cost - required** | **One power-monitoring plug, $12-25** (Kasa EP25 ~$20, Shelly Plug S ~$25, Sonoff S31 ~$12). Free if the device already sits on one. |
 | **Cost - optional** | None. |
 
 Turns a power-monitoring smart plug off once whatever is charging on it has
-actually finished, instead of leaving it trickle-charging indefinitely.
-Optionally turns the plug back on at a set time every day, so the next
-charge starts automatically without anyone touching Home Assistant.
+actually finished, instead of leaving it trickle-charging indefinitely - so a
+ride-on pack, e-bike or drill battery on a dumb charger stops being cooked on
+float for a week at a time and lasts years instead of a season. Optionally
+turns the plug back on at a set time every day, so the next charge starts
+automatically and nobody has to remember to plug or unplug anything.
 
 Built for battery-powered things where "just unplug it when it's full"
 doesn't happen in practice - ride-on toys, e-bikes, drill batteries, and
@@ -213,13 +216,13 @@ charge from empty.
 
 | At a glance | |
 |---|---|
-| **What's in it for me** | One page per real outage instead of a stream of down/up pushes - so you keep reading the alerts. Recovery is logged, not buzzed. |
 | **What I need** | Any entity whose state means up/down, one Toggle helper per watched thing, a notify service. |
 | **Effort** | **Low** - 5 minutes. |
 | **Cost - required** | **$0.** |
 | **Cost - optional** | None. |
 
-Pages once per real outage instead of once per flip. Written for anything
+Pages once per real outage instead of once per flip, so you keep reading
+the alerts instead of muting them. Written for anything
 that flaps - a camera stream that stalls and recovers on its own, an
 integration that drops overnight and comes back before anyone's up to see
 it - where a plain "notify on state change" automation turns one outage
@@ -228,8 +231,8 @@ into a stream of "it's down" / "it's back" pushes.
 The fix is two rules: a state has to hold for a confirmation window before
 it counts as a real outage, and once an outage has paged, it doesn't page
 again until it has actually recovered and gone bad a second time. Recovery
-itself is quiet by default - routed to a persistent notification instead of
-a push, unless you turn push-on-recovery on.
+itself is quiet by default - logged to a persistent notification instead of
+buzzed to your phone, unless you turn push-on-recovery on.
 
 This watches one entity's state, not an arbitrary numeric trend. If what
 you have is a raw number, turn it into a binary/problem sensor first (a
@@ -265,7 +268,6 @@ Template or Threshold helper) and point this at that.
 
 | At a glance | |
 |---|---|
-| **What's in it for me** | A hub, bridge or Pi that goes deaf gets you one notification instead of a hundred - and, if you opt in, one capped power-cycle so you stop being the person who walks to the closet and pulls the plug. |
 | **What I need** | A few entities that go unavailable when the device is unreachable, one Toggle helper, a notify service. For auto power-cycle: a smart plug on the device and one Counter helper. |
 | **Effort** | **Low-Medium** - 15 minutes; two helpers if you enable power-cycling. |
 | **Cost - required** | **$0** as a notifier. |
@@ -273,11 +275,14 @@ Template or Threshold helper) and point this at that.
 
 For a single point of failure that lives on a smart plug - a hub or bridge,
 a Raspberry Pi, a Wi-Fi extender, anything where "someone pulls the plug
-and puts it back" is the known fix for it going deaf. Watches one or more
-entities that only report data when the device is reachable. When enough
-of them go unavailable for a confirmation window, it notifies once. If the
-outage keeps going past a second, longer window, it can optionally
-power-cycle the device through a smart plug and notify that it did so.
+and puts it back" is the known fix for it going deaf. When it does, you get
+one notification instead of a hundred - and, if you opt in, one capped
+power-cycle, so you stop being the person who walks to the closet and pulls
+the plug. It watches one or more entities that only report data when the
+device is reachable. When enough of them go unavailable for a confirmation
+window, it notifies once. If the outage keeps going past a second, longer
+window, it can optionally power-cycle the device through a smart plug and
+notify that it did so.
 
 Two safety rails: a daily cap on auto power-cycles (a device that's
 genuinely dead just gets you a notification instead of endless
@@ -321,7 +326,6 @@ purely as an offline notifier.
 
 | At a glance | |
 |---|---|
-| **What's in it for me** | A door-left-open alert that never nags mid-grocery-unload and is loud by the time it matters: quiet at 1 min, high priority at 5, sticky at 15, one banner that replaces itself, dismissed the moment the door closes. Same shape works for a sump pump or a space heater. |
 | **What I need** | A contact sensor (or any binary sensor) and the Home Assistant Companion app for the tag / priority / clear-banner behaviour. |
 | **Effort** | **Low** - 5 minutes. |
 | **Cost - required** | **A contact sensor, $15-40** (Aqara ~$15-20, Sonoff ~$12, Hue Secure ~$40). $0 if you already have door sensors. |
@@ -332,9 +336,11 @@ than a normal cycle, a space heater still on an hour after everyone left
 the room - all the same shape of problem: a binary state that's fine
 briefly and a real problem if it doesn't clear. A single fixed-delay
 reminder either nags people mid-grocery-unload or waits so long it's
-useless as a safety alert; this uses three escalating stages instead, so
-normal use never triggers anything past the quiet first stage, and
-something genuinely left alone gets progressively louder.
+useless as a safety alert; this uses three escalating stages instead -
+quiet at 1 minute, high priority at 5, sticky at 15, one banner that replaces
+itself and clears the moment the door closes - so normal use never triggers
+anything past the quiet first stage, and something genuinely left alone gets
+progressively louder.
 
 Stage 1 is a quiet, default-priority notification. Stage 2 is high
 priority. Stage 3 is high priority and sticky. Each stage reuses the same
@@ -368,7 +374,6 @@ Any entity with a "bad" and "ok" state - typically a `binary_sensor`
 
 | At a glance | |
 |---|---|
-| **What's in it for me** | One number - what the thermostat is actually aiming for right now - that every room automation can read in any mode, instead of six copies of the heat/cool/heat_cool attribute dance. The fix for smart vents in manual mode. |
 | **What I need** | A `climate` entity. That's it - this is a Template helper created from the blueprint. |
 | **Effort** | **Low** - 5 minutes (Helpers -> Template -> use a blueprint). |
 | **Cost - required** | **$0** with any smart thermostat you already own. |
@@ -376,7 +381,10 @@ Any entity with a "bad" and "ok" state - typically a `binary_sensor`
 
 Creates one sensor: the temperature your thermostat is actually trying to
 hit right now, as a single number, no matter which of its modes (heat,
-cool, or heat_cool/auto) it happens to be in.
+cool, or heat_cool/auto) it happens to be in - so every room automation
+reads one number in any mode instead of carrying its own copy of the
+heat/cool/heat_cool attribute dance. It is also the fix for smart vents in
+manual mode (blueprint 7 reads it).
 
 ### Why this exists
 
@@ -425,7 +433,6 @@ Template a sensor**, then choose "use a blueprint."
 
 | At a glance | |
 |---|---|
-| **What's in it for me** | Hot and cold rooms even out without the vent vendor's cloud writing your thermostat behind your back, and battery vents stop chattering (one guest room went from 204 moves a day to single digits). |
 | **What I need** | Smart vents with `cover` entities (Flair via its HACS integration), a temperature sensor in each room, a thermostat with `hvac_action`, and a target sensor (the template blueprint above). One instance per room. |
 | **Effort** | **Medium for the blueprint** - 15 minutes per room, then a week of watching move counts and adjusting the hysteresis. The hardware side (vents, pucks, per-room sensors) is a weekend, not a blueprint. |
 | **Cost - required** | **Smart vents, $70-100 each** for the rooms you want to control, plus a smart thermostat (above) if you have none. |
@@ -435,7 +442,9 @@ Opens a room's smart vents/registers when the house's active heating or
 cooling would actually help that room, and closes them once the room is
 within a hysteresis band of its target. Does nothing while the system is
 idle - a vent stays exactly where it last was rather than being forced open
-or shut for no reason.
+or shut for no reason. Hot and cold rooms even out without the vent vendor's
+cloud writing your thermostat behind your back, and battery vents stop
+chattering - one guest room went from 204 moves a day to single digits.
 
 Written for anyone running smart vents (Flair, Keen, or similar) in a
 manual/non-cloud mode alongside a smart thermostat. This automation only
