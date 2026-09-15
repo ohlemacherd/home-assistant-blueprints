@@ -497,7 +497,7 @@ the top of each file.
 
 See [CHANGELOG.md](CHANGELOG.md). Blueprints import from `main`; the changelog says when one changed behaviour.
 
-## Honest expectations
+## What to expect
 
 These are blueprints pulled out of a personal Home Assistant setup and
 generalized, published to see whether they're useful to anyone else. They
