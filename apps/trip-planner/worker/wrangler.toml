@@ -1,0 +1,21 @@
+name = "trip-planner-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# The Google key is a secret, never a var:
+#   npx wrangler secret put GOOGLE_MAPS_API_KEY
+[vars]
+# Comma-separated origins allowed to call /api/plan (where the app is hosted).
+ALLOWED_ORIGINS = "http://localhost:8080"
+# Pages of gas stations fetched on legs over 2.5 hours (1-3). Each page is a billed call.
+MAX_GAS_PAGES = "2"
+
+# Per-IP limit: 20 plans a minute. Stops a stray loop or a scraper from running
+# up the Google bill; the Google Cloud daily quota caps are the real backstop.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60

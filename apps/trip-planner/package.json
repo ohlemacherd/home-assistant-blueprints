@@ -1,0 +1,14 @@
+{
+  "name": "trip-planner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Road-trip stop planner for work drives: ranks gas and food stops along the route by cash back, bathrooms, ratings, safety signals and coworker finds.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "python3 -m http.server 8080"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
