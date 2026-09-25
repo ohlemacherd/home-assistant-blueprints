@@ -1,0 +1,325 @@
+blueprint:
+  name: AI Camera Yes/No Check (won't guess)
+  description: >
+    Turns a camera into a yes/no sensor you can build automations on. Write
+    one question in plain words, such as "Is the garage door open, even
+    partly?", "Is there a package on the doormat?" or "Are the trash carts
+    still at the curb?". Each time this script runs, it sends one snapshot
+    to an AI Task entity and writes the answer into a Toggle helper. Your
+    automations then treat that Toggle like any other sensor: they can mark
+    a chore done, send a reminder, or stay quiet. You can run the script
+    from a time trigger, a dashboard button or another automation. It also
+    hands its result back to whatever called it: yes, no or unusable.
+
+
+    Why not just ask the AI? A vision model asked a yes/no question will
+    answer it even when the picture is black or blurred, or when the thing
+    you asked about is out of frame. Its own description of the scene will
+    then quietly contradict its answer. Two rules deal with that. The model
+    has to describe what is actually in the frame before it answers, and it
+    has to say whether the image is usable at all. An unusable image never
+    changes the Toggle, which keeps its last answer, and the reason goes
+    into an optional Text helper. A slightly stale answer that was true is
+    better than a confident guess, especially a guess that nags someone
+    about a chore they already did.
+
+
+    It sends one snapshot on purpose. When nothing in the scene is moving
+    (a door, a bin, a parked car), extra frames add no quality. They add
+    noise instead: a passing car, a branch in the wind, a change in
+    exposure.
+
+
+    Example: point it at a garage camera, ask "Is the big garage door open,
+    even partly?", and feed the Toggle to this repo's Escalating Left-Open
+    Reminder. The Toggle changes only when a check runs, so two settings
+    matter. Run the check on a steady interval, for example every 10
+    minutes, which is 144 AI calls a day. Then set the reminder's stage
+    delays longer than that interval, for example 15/30/60 minutes. With
+    the default 1/5/15, a door closed right after an "open" read still
+    gets all three reminders. If the camera can't see, the Toggle keeps
+    its last answer, and that can be "open", so the reminders keep
+    escalating until a check can see again.
+
+
+    Known limit: the check sees whatever the camera's still snapshot shows.
+    Some cameras (WebRTC-only streams, battery cameras that sleep) return a
+    black or placeholder still. In that case every check comes back
+    unusable, which is the honest answer, and the thing to fix is the
+    snapshot, not the question. Each run costs one AI call, so run it on a
+    schedule or when something happens, never in a loop.
+  domain: script
+  homeassistant:
+    # 2025.8: AI Task image attachments (and the attachment feature flag
+    # the AI Task selector below filters on).
+    min_version: 2025.8.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/script/ohlemacherd/ai-camera-yes-no-check.yaml
+  input:
+    camera:
+      name: Camera
+      description: >-
+        The camera to look through. The check uses a single still snapshot,
+        so first open the camera in Home Assistant and make sure its still
+        image is a current picture and not a black frame or a placeholder.
+      selector:
+        entity:
+          filter:
+            - domain: camera
+    question:
+      name: Question
+      description: >-
+        One yes/no question about something this camera can clearly see,
+        for example "Is the garage door open, even partly?", "Is there a
+        package on the doormat?" or "Is a car parked in this bay?". Say what
+        the thing is and where it sits in the picture, and say what should
+        NOT count ("ignore bins inside the open garage"). Ask about what the
+        camera can see, which is not always what you want to know. The next
+        input covers that case.
+      selector:
+        text:
+          multiline: true
+    on_when:
+      name: Turn the result helper on when the answer is
+      description: >-
+        Usually "Yes". Pick "No" when the question the camera can answer is
+        the opposite of what you want the helper to mean. For example, a
+        camera inside a garage can't tell whether the car is out on the
+        road, but it can see an empty bay. Ask "Is a car parked in this
+        bay?" and pick "No", and the helper is ON while the car is out.
+      default: "yes"
+      selector:
+        select:
+          options:
+            - label: "Yes"
+              value: "yes"
+            - label: "No"
+              value: "no"
+    ai_task:
+      name: AI Task entity
+      description: >-
+        The AI that looks at the image (Settings -> Devices & services ->
+        your AI integration -> AI Task). It has to accept image attachments,
+        and the list only shows entities that do. A local model has to be a
+        vision model.
+      selector:
+        entity:
+          filter:
+            - domain: ai_task
+              supported_features:
+                - ai_task.AITaskEntityFeature.SUPPORT_ATTACHMENTS
+    result_helper:
+      name: Result helper
+      description: >-
+        A Toggle helper that holds the answer (Settings -> Devices &
+        services -> Helpers -> Create helper -> Toggle). It only changes when
+        the camera could actually see. An unusable image leaves it as it
+        was. Trigger automations on it the same way you would on a door
+        sensor. Create one helper for each check, and don't share them.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    note_helper:
+      name: "\"Couldn't tell\" note (optional)"
+      description: >-
+        A Text helper (Create helper -> Text) that gets the reason whenever a
+        check couldn't see, for example "12:00 - couldn't tell: too dark to
+        see the door". The next good check clears it. While the note has text
+        in it, the result helper is showing an older answer. Text helpers
+        hold 100 characters unless you raise the maximum, and the note is
+        cut to fit whatever the maximum is.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+    checked_at_helper:
+      name: Last confirmed at (optional)
+      description: >-
+        A Date and time helper (Create helper -> Date and/or time -> Date
+        and time). It is stamped each time the camera could see and the
+        result helper was confirmed, and it is not stamped when a check was
+        unusable. An automation can compare it with the current time and
+        skip acting on an answer that has gone stale.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_datetime
+    extra_instructions:
+      name: Extra instructions (optional)
+      description: >-
+        Anything else the model should know about this camera's view, for
+        example "Night vision is black and white, so a grey box on the mat
+        still counts as a package" or "The door's bottom seal is black, so a
+        dark line along the floor is not a gap". Keep it to what is in the
+        picture.
+      default: ""
+      selector:
+        text:
+          multiline: true
+
+# queued, not single: two callers at the same moment (a schedule and a
+# dashboard button) each wait a few seconds for their own answer instead
+# of one being dropped with no response. Queued also stops two runs from
+# writing the same helpers at the same time.
+mode: queued
+max: 3
+
+variables:
+  camera: !input camera
+  question: !input question
+  on_when: !input on_when
+  ai_task: !input ai_task
+  result_helper: !input result_helper
+  note_helper: !input note_helper
+  checked_at_helper: !input checked_at_helper
+  extra_instructions: !input extra_instructions
+
+sequence:
+  # One call, one snapshot, a structured answer. A media-source://camera/
+  # attachment is a single still, and for a scene that isn't moving that is
+  # the right amount.
+  #
+  # The structure keys are named so that alphabetical order matches the
+  # order they are declared in: scene, scene_usable, verdict, why. Some
+  # providers sort a schema's properties alphabetically, and the order is
+  # the point here: the description has to come before the verdict.
+  - action: ai_task.generate_data
+    continue_on_error: true
+    data:
+      task_name: camera_yes_no_check
+      entity_id: "{{ ai_task }}"
+      instructions: >-
+        You are looking at one still image from a camera at someone's home,
+        to answer a single yes/no question. A wrong answer is worse than no
+        answer.
+
+        Work in this order.
+
+        1. scene: describe in one sentence what is actually visible in the
+        image, before deciding anything.
+
+        2. scene_usable: false if the image is too dark, blurred, washed out,
+        blank, frozen, an error or placeholder picture, or if the thing the
+        question is about is out of frame or hidden. When in doubt, false.
+
+        3. verdict: the answer to the question, true for yes and false for
+        no. Judge only what is clearly visible in this image. Do not guess,
+        and do not infer from the time of day or from what is usual.
+
+        4. why: one short sentence naming what in the image decided it, or
+        what made it unusable.
+
+        The question: {{ question }}
+        {%- if extra_instructions | trim != '' %}
+
+        About this camera's view: {{ extra_instructions }}
+        {%- endif %}
+      structure:
+        scene:
+          description: One sentence describing what is actually visible in the image, written before deciding anything.
+          required: true
+          selector:
+            text: {}
+        scene_usable:
+          description: False if the image is too dark, blurred, blank, an error or placeholder, or the thing the question asks about is not visible, so the question cannot be judged from this image.
+          required: true
+          selector:
+            boolean: {}
+        verdict:
+          description: The answer to the question. True means yes, false means no.
+          required: true
+          selector:
+            boolean: {}
+        why:
+          description: One short sentence naming what in the image decided the answer, or what made it unusable.
+          required: true
+          selector:
+            text: {}
+      attachments:
+        - media_content_id: "media-source://camera/{{ camera }}"
+          media_content_type: image/jpeg
+    response_variable: vision
+
+  # Read the answer defensively. A failed call leaves `vision` undefined. A
+  # missing or unrecognisable verdict counts as no answer, and a missing
+  # scene_usable counts as unusable. Anything in doubt routes to "hold the
+  # last state", never to a guess.
+  - variables:
+      got: "{{ vision is defined and vision.data is defined and vision.data is mapping }}"
+      scene: "{{ (vision.data.scene | default('', true) | string | trim) if got else '' }}"
+      why: "{{ (vision.data.why | default('', true) | string | trim) if got else '' }}"
+      answer: >-
+        {%- set v = (vision.data.verdict | default(none)) | bool(none) if got else none -%}
+        {{- '' if v is none else ('yes' if v else 'no') -}}
+      usable: "{{ got and answer != '' and ((vision.data.scene_usable | default(none)) | bool(false)) }}"
+      outcome: "{{ answer if usable else 'unusable' }}"
+      helper_on: "{{ usable and answer == on_when }}"
+      reason: >-
+        {%- if not got -%}no answer from the AI Task entity (the call failed or came back empty)
+        {%- elif answer == '' -%}the model gave no yes/no answer
+        {%- else -%}{{ why or scene or 'the image was not usable' }}{%- endif -%}
+
+  - if:
+      - condition: template
+        value_template: "{{ usable }}"
+    then:
+      - action: "input_boolean.turn_{{ 'on' if helper_on else 'off' }}"
+        target:
+          entity_id: "{{ result_helper }}"
+      - if:
+          - condition: template
+            value_template: "{{ checked_at_helper != '' }}"
+        then:
+          - action: input_datetime.set_datetime
+            continue_on_error: true
+            target:
+              entity_id: "{{ checked_at_helper }}"
+            data:
+              timestamp: "{{ now().timestamp() }}"
+      - if:
+          - condition: template
+            value_template: "{{ note_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            continue_on_error: true
+            target:
+              entity_id: "{{ note_helper }}"
+            data:
+              value: ""
+    else:
+      # Unusable: the result helper and the timestamp stay exactly as they
+      # were. Only the note says why.
+      - if:
+          - condition: template
+            value_template: "{{ note_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            continue_on_error: true
+            target:
+              entity_id: "{{ note_helper }}"
+            data:
+              value: >-
+                {%- set mx = state_attr(note_helper, 'max') | int(100) -%}
+                {{- (now().strftime('%H:%M') ~ " - couldn't tell: " ~ reason)[:mx] -}}
+
+  # Returned to a caller that uses response_variable:
+  #   outcome       yes / no / unusable. This is the one to act on.
+  #   answer        what the model said (yes / no, or empty), reported even
+  #                 when the image was unusable. Use it to tune the question,
+  #                 not to act on.
+  #   usable        true / false
+  #   helper_state  on / off: what the result helper holds after this check
+  #   scene         the model's one-sentence description of the image
+  #   reasoning     what decided it, or why it couldn't tell
+  - variables:
+      result:
+        outcome: "{{ outcome }}"
+        answer: "{{ answer }}"
+        usable: "{{ usable }}"
+        helper_state: "{{ ('on' if helper_on else 'off') if usable else states(result_helper) }}"
+        scene: "{{ scene }}"
+        reasoning: "{{ why if usable else reason }}"
+  - stop: Checked
+    response_variable: result
