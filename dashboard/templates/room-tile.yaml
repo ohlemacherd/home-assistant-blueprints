@@ -7,15 +7,15 @@
 #
 #   - type: custom:button-card
 #     template: room_tile
-#     entity: sensor.nursery_temperature          # the room's temperature sensor
+#     entity: sensor.study_temperature            # the room's temperature sensor
 #     variables:
-#       room_name: Nursery
-#       room_icon: mdi:baby-carriage
+#       room_name: Study
+#       room_icon: mdi:desk
 #       target_entity: sensor.effective_thermostat_target   # any numeric entity (see this repo's template blueprint)
 #       fallback_target: 70                       # used when target_entity is unavailable
-#       occ_entity: binary_sensor.nursery_occupancy   # optional: green dot when on
-#       hum_entity: sensor.nursery_humidity           # optional
-#       vent_entities: [cover.nursery_vent]           # optional: tilt-position covers (Flair etc.)
+#       occ_entity: binary_sensor.study_occupancy     # optional: green dot when on
+#       hum_entity: sensor.study_humidity             # optional
+#       vent_entities: [cover.study_vent]             # optional: tilt-position covers (Flair etc.)
 #       follows_main: false                           # true for rooms without a vent
 #
 # The "detailed" layer is on for any viewport under 1000px (phones) and, on

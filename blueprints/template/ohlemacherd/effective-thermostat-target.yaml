@@ -28,7 +28,7 @@ blueprint:
     the thermostat directly instead - the one appliance that is always
     authoritative about what it is trying to do - sidesteps that failure
     mode entirely, and gives every room automation in the house one place to
-    look instead of six copies of the same mode-branching logic.
+    look instead of a copy of the same mode-branching logic per room.
 
 
     Pair this with the "Vent/Register Modulation Against a Target" automation

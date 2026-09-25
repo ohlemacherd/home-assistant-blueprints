@@ -72,7 +72,7 @@ blueprint:
           mode: box
     label:
       name: What to call this device in notifications
-      description: 'e.g. "Zigbee bridge", "Garage Pi".'
+      description: 'e.g. "Zigbee bridge", "Raspberry Pi".'
       selector:
         text: {}
     notified_flag:

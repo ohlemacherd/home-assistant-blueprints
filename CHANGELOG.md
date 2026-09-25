@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-09-25
+
+- AI Daily Briefing: the default **Who this is for** line is now generic ("the people in this household, reading it on a shared screen or their phones"). If you never changed that input, the prompt wording changes on your next run; set the input to keep the old line.
+- Docs and input examples: house-specific names, rooms and measurements replaced with generic ones. No other behaviour change.
+
 ## 2026-09-08
 
 First public version: seven blueprints, two button-card templates, one usage doc.
