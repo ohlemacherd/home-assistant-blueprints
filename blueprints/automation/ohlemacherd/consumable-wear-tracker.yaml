@@ -1,0 +1,780 @@
+blueprint:
+  name: Consumable Wear Tracker
+  description: >
+    Tells you when a part that wears out is actually worn out - a
+    toothbrush head, a furnace or AC filter, a humidifier wick, a water or
+    vacuum filter - by counting how much it has really been used instead of
+    trusting a calendar. It counts real uses (a device that holds a state
+    such as "running" for at least a few seconds) or real runtime (minutes
+    something was running). The part is due at its usage limit or its age
+    limit, whichever comes first, with an optional shorter age limit for
+    part of the year (pollen season, for a furnace filter). When it is due,
+    a helper turns on, you are notified once, and an action of your choice
+    runs: add a to-do item, make a chore due, anything. When you record the
+    real swap (a button press, ticking that to-do item, or an event), the
+    count goes back to zero and the replaced-on date is stamped.
+
+
+    It needs three helpers you create once per part: a Counter, a Date and
+    a Toggle. Example: a furnace filter in runtime mode, reading the
+    thermostat's hvac_action every 5 minutes, due at 500 hours of blower
+    time or 90 days, with a to-do item added when it's due and ticking that
+    item recorded as the swap.
+
+
+    Why not a calendar reminder: "replace every three months" assumes an
+    average user. A head used half as often is thrown away at half its
+    life, and a furnace filter wears far faster in a heat wave than in a
+    mild spring. Counting use is the honest measure. The age limit stays as
+    a backstop, because bristles, filter media and wicks also age when they
+    sit unused.
+
+
+    Why not the obvious helpers: history_stats looks like free runtime
+    counting, but it reads the recorder, and the recorder purges after 10
+    days by default, so a total that spans months comes out low without
+    telling you. A Counter helper survives restarts and is never purged.
+    And reaching the limit only proves the part is due, not that anyone
+    replaced it, so this automation never marks anything done by itself -
+    only your swap signal does. No custom integration needed.
+
+
+    Known limit: due is checked once a day at the time you pick, so a part
+    that crosses its limit at 3am is reported at breakfast, and one that
+    crosses while Home Assistant is down is reported the next day. Set the
+    replaced-on date helper to the real date when you install this: a new
+    date helper starts at today, not at "never", which quietly restarts the
+    age clock.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/consumable-wear-tracker.yaml
+  input:
+    part_section:
+      name: The part and its helpers
+      icon: mdi:air-filter
+      description: >-
+        Create three helpers first, all dedicated to this one part (Settings
+        -> Devices & services -> Helpers -> Create helper): a Counter, a Date
+        and/or time (date only is fine), and a Toggle. Create a new set for
+        each part you track - don't share them.
+      input:
+        label:
+          name: What to call it
+          description: 'Used in notifications and the to-do item, e.g. "Furnace filter", "Toothbrush head".'
+          default: Filter
+          selector:
+            text: {}
+        track_mode:
+          name: How to count use
+          description: >-
+            Discrete uses: one count each time a device holds a state (such
+            as "running") for a few seconds - a toothbrush, a robot vacuum
+            run, a pitcher fill. Runtime: the minutes something was running -
+            a furnace blower, a humidifier, a pump. Fill in the matching
+            section below and leave the other one alone.
+          default: uses
+          selector:
+            select:
+              options:
+                - label: Discrete uses
+                  value: uses
+                - label: Runtime minutes
+                  value: runtime
+        usage_counter:
+          name: Counter helper
+          description: >-
+            Holds the uses (discrete mode) or the minutes of runtime (runtime
+            mode). Create it with no maximum. If the part in place today is
+            already part-used, set the counter to your best estimate once
+            (the counter's own settings, or the counter.set_value action).
+          selector:
+            entity:
+              filter:
+                - domain: counter
+        replaced_helper:
+          name: Replaced-on date helper
+          description: >-
+            When the current part went in. Set it to the real date right
+            after creating it: a new date helper starts at today, not at
+            "never", so if you leave it alone the age clock starts from
+            today. It is stamped with today whenever you record a swap. It
+            must include a date; a time-only helper is ignored.
+          selector:
+            entity:
+              filter:
+                - domain: input_datetime
+        due_flag:
+          name: '"Due" helper'
+          description: >-
+            A Toggle. Turned on when the part becomes due, which is what
+            makes the notification arrive once rather than every day, and
+            turned off only when you record the swap. Useful on a dashboard
+            too. Turn it off by hand and you will be reminded again at the
+            next daily check.
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+    uses_section:
+      name: Discrete uses (leave alone in runtime mode)
+      icon: mdi:counter
+      input:
+        usage_entity:
+          name: Device that shows a use (optional)
+          description: >-
+            The entity whose state marks one use: a toothbrush's state
+            sensor, a vacuum, a smart plug's switch. Leave empty in runtime
+            mode.
+          default: []
+          selector:
+            entity: {}
+        usage_state:
+          name: '"In use" state'
+          description: >-
+            The exact state that means in use, e.g. running, cleaning, on.
+            Case-sensitive.
+          default: "on"
+          selector:
+            text: {}
+        min_use_seconds:
+          name: Seconds it must hold before it counts
+          description: >-
+            The noise filter. Knocking a toothbrush off its charger or a
+            five-second test is not a use. Pick something well under a real
+            use and well over an accident.
+          default: 30
+          selector:
+            number:
+              min: 0
+              max: 3600
+              step: 1
+              unit_of_measurement: seconds
+              mode: box
+        min_gap_minutes:
+          name: Minutes before another use can count
+          description: >-
+            A device that drops off and comes back in the middle of one use
+            (a Bluetooth toothbrush losing signal, say) would otherwise count
+            twice. Uses that start within this many minutes of the last
+            counted one are ignored. 0 counts every one; 10 suits a
+            toothbrush.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 1440
+              step: 1
+              unit_of_measurement: minutes
+              mode: box
+        use_limit:
+          name: Usage limit
+          description: >-
+            How many uses the part is rated for. The usual "three months" for
+            a toothbrush head assumes two brushings a day, which is about
+            180.
+          default: 180
+          selector:
+            number:
+              min: 1
+              max: 100000
+              step: 1
+              unit_of_measurement: uses
+              mode: box
+    runtime_section:
+      name: Runtime (leave alone in discrete mode)
+      icon: mdi:fan
+      input:
+        runtime_entities:
+          name: What runs (optional)
+          description: >-
+            One or more entities. Runtime counts whenever any of them is
+            running. A thermostat (its hvac_action attribute is read), a fan,
+            a binary sensor for "blower on", a smart plug. Leave empty in
+            discrete mode.
+          default: []
+          selector:
+            entity:
+              multiple: true
+        running_states:
+          name: States that mean running
+          description: >-
+            Compared with each entity's state and with the attribute below.
+            The defaults cover a thermostat's hvac_action (heating, cooling,
+            drying and fan all push air through the filter) and plain on/off
+            entities. Type your own if yours differ.
+          default:
+            - "on"
+            - heating
+            - cooling
+            - drying
+            - fan
+          selector:
+            select:
+              multiple: true
+              custom_value: true
+              options:
+                - "on"
+                - running
+                - heating
+                - cooling
+                - drying
+                - fan
+        running_attribute:
+          name: Attribute to read as well (optional)
+          description: >-
+            Also compare this attribute of each entity: hvac_action for a
+            thermostat. Entities that don't have it are judged by their state
+            alone. Clear it to use states only.
+          default: hvac_action
+          selector:
+            text: {}
+        tick_pattern:
+          name: How often to sample
+          description: >-
+            Each sample that finds it running adds this many minutes to the
+            counter. Five minutes is plenty for a part rated in hundreds of
+            hours.
+          default: "/5"
+          selector:
+            select:
+              options:
+                - label: Every minute
+                  value: "/1"
+                - label: Every 2 minutes
+                  value: "/2"
+                - label: Every 5 minutes
+                  value: "/5"
+                - label: Every 10 minutes
+                  value: "/10"
+                - label: Every 15 minutes
+                  value: "/15"
+                - label: Every 30 minutes
+                  value: "/30"
+        runtime_limit_hours:
+          name: Runtime limit
+          description: >-
+            Hours of running the part is good for. Makers usually rate
+            filters in months, so a starting point is their months times the
+            hours a day your system typically runs. Adjust after the first
+            swap, once you have seen how dirty it was.
+          default: 500
+          selector:
+            number:
+              min: 1
+              max: 100000
+              step: 1
+              unit_of_measurement: hours
+              mode: box
+    age_section:
+      name: Age limit
+      icon: mdi:calendar-clock
+      input:
+        age_limit_days:
+          name: Age limit
+          description: >-
+            Due after this many days even if it has barely been used. 0 means
+            no age limit.
+          default: 90
+          selector:
+            number:
+              min: 0
+              max: 3650
+              step: 1
+              unit_of_measurement: days
+              mode: box
+        seasonal_months:
+          name: Months with a shorter age limit (optional)
+          description: >-
+            During these months the shorter limit below applies instead, e.g.
+            pollen season for a furnace filter. Leave empty for one limit all
+            year.
+          default: []
+          selector:
+            select:
+              multiple: true
+              options:
+                - label: January
+                  value: "1"
+                - label: February
+                  value: "2"
+                - label: March
+                  value: "3"
+                - label: April
+                  value: "4"
+                - label: May
+                  value: "5"
+                - label: June
+                  value: "6"
+                - label: July
+                  value: "7"
+                - label: August
+                  value: "8"
+                - label: September
+                  value: "9"
+                - label: October
+                  value: "10"
+                - label: November
+                  value: "11"
+                - label: December
+                  value: "12"
+        seasonal_age_days:
+          name: Shorter age limit in those months
+          description: >-
+            Used only during the months above. 0 turns it off. If it is set
+            higher than the normal age limit, the lower of the two wins.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 3650
+              step: 1
+              unit_of_measurement: days
+              mode: box
+    due_section:
+      name: When it's due, and when it's done
+      icon: mdi:bell-check
+      description: >-
+        To record a swap you can press a button, tick the to-do item, or
+        fire the event consumable_replaced with event data counter set to
+        this part's Counter helper (from a script, an NFC tag automation,
+        or Developer tools -> Events). Recording a swap works whether or not
+        the part was due, so an early swap counts too.
+      input:
+        check_time:
+          name: Daily check time
+          description: When to check whether the part has become due.
+          default: "09:00:00"
+          selector:
+            time: {}
+        notify_service:
+          name: Notify service
+          description: >-
+            Where the one "it's due" message goes, e.g.
+            notify.mobile_app_your_phone, a notify group, or a script of your
+            own that takes title and message fields. The default is built in
+            and shows under Settings -> Notifications; that notice is
+            dismissed for you when the swap is recorded.
+          default: notify.persistent_notification
+          selector:
+            text: {}
+        on_due_action:
+          name: When it becomes due, also do (optional)
+          description: >-
+            Runs once, alongside the notification: make a chore due in your
+            chore app, flash a light, anything. If either one fails, the
+            other still runs. Don't mark the part done here - reaching the
+            limit proves it is due, not that it was replaced.
+          default: []
+          selector:
+            action: {}
+        todo_list:
+          name: To-do list (optional)
+          description: >-
+            When the part becomes due, an item is added here. Ticking it
+            records the swap; deleting it does not. However the swap is
+            recorded (tick, button or event), the item is then removed from
+            the list, ticked or not. Some lists drop ticked items instead of
+            keeping them; there a tick looks the same as a delete and records
+            nothing, so use a button or the event.
+          default: []
+          selector:
+            entity:
+              filter:
+                - domain: todo
+        todo_item:
+          name: To-do item text (optional)
+          description: >-
+            Leave empty for "Replace" plus the name above. Use wording that
+            nothing else on that list uses.
+          default: ""
+          selector:
+            text: {}
+        done_buttons:
+          name: Buttons that record the swap (optional)
+          description: >-
+            Pressing any of these records the swap: a Button helper on a
+            dashboard, or any button entity.
+          default: []
+          selector:
+            entity:
+              multiple: true
+              filter:
+                - domain: input_button
+                - domain: button
+        on_done_action:
+          name: When the swap is recorded, also do (optional)
+          description: >-
+            Runs after the count is reset, alongside the confirmation: take
+            one filter out of your stock count, log it somewhere, anything.
+          default: []
+          selector:
+            action: {}
+        notify_on_done:
+          name: Also push a notification when the swap is recorded?
+          description: >-
+            Off by default: the confirmation is a quiet notice under Settings
+            -> Notifications. Turn on to send it to the notify service above.
+          default: false
+          selector:
+            boolean: {}
+
+# queued: a swap recorded while another run is busy (a slow on-due action)
+# must not be dropped. Runs are short, so a queue of 10 should never fill; if
+# a burst of list changes ever fills it, warning leaves a log line for the
+# dropped run instead of nothing.
+mode: queued
+max: 10
+max_exceeded: warning
+
+variables:
+  label: !input label
+  track_mode: !input track_mode
+  usage_counter: !input usage_counter
+  replaced_helper: !input replaced_helper
+  due_flag: !input due_flag
+  min_gap_minutes: !input min_gap_minutes
+  use_limit: !input use_limit
+  runtime_entities: !input runtime_entities
+  running_states: !input running_states
+  running_attribute: !input running_attribute
+  tick_pattern: !input tick_pattern
+  runtime_limit_hours: !input runtime_limit_hours
+  age_limit_days: !input age_limit_days
+  seasonal_months: !input seasonal_months
+  seasonal_age_days: !input seasonal_age_days
+  notify_service: !input notify_service
+  notify_on_done: !input notify_on_done
+  todo_list_input: !input todo_list
+  todo_item_input: !input todo_item
+  todo_list: "{{ todo_list_input if todo_list_input is string else '' }}"
+  todo_text: "{{ (todo_item_input or '') | trim if (todo_item_input or '') | trim != '' else 'Replace ' ~ label | lower }}"
+  tick_minutes: "{{ tick_pattern | replace('/', '') | int(5) }}"
+  running: >-
+    {% set ns = namespace(on=false) %}
+    {% set attr = running_attribute | trim %}
+    {% for e in ([runtime_entities] if runtime_entities is string else runtime_entities) %}
+      {% if states(e) in running_states
+            or (attr != '' and (state_attr(e, attr) | string) in running_states) %}
+        {% set ns.on = true %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.on }}
+
+triggers:
+  - trigger: state
+    entity_id: !input usage_entity
+    to: !input usage_state
+    for:
+      seconds: !input min_use_seconds
+    id: use
+  - trigger: time_pattern
+    minutes: !input tick_pattern
+    id: runtime_tick
+  - trigger: time
+    at: !input check_time
+    id: daily_check
+  - trigger: state
+    entity_id: !input done_buttons
+    not_from:
+      - unavailable
+    not_to:
+      - unavailable
+      - unknown
+    id: done_button
+  - trigger: event
+    event_type: consumable_replaced
+    event_data:
+      counter: !input usage_counter
+    id: done_event
+  - trigger: state
+    entity_id: !input todo_list
+    not_from:
+      - unavailable
+      - unknown
+    not_to:
+      - unavailable
+      - unknown
+    id: todo_changed
+
+# Stop the triggers that don't apply before any action runs. They still leave
+# a trace each (a run stopped by a condition is stored), so with samples every
+# few minutes the default 5 stored traces cover well under an hour: open a
+# daily check's or a swap's trace soon after it happens.
+conditions:
+  - condition: template
+    value_template: >-
+      {% if trigger.id == 'use' %}
+        {{ track_mode == 'uses' }}
+      {% elif trigger.id == 'runtime_tick' %}
+        {{ track_mode == 'runtime' and running }}
+      {% elif trigger.id == 'todo_changed' %}
+        {{ todo_list != '' and is_state(due_flag, 'on') }}
+      {% elif trigger.id == 'done_button' %}
+        {{ trigger.from_state is not none }}
+      {% else %}
+        true
+      {% endif %}
+
+actions:
+  - choose:
+      - alias: One real use
+        conditions:
+          - condition: trigger
+            id: use
+          # An unavailable counter is not 0: never restart the count from it.
+          - condition: template
+            value_template: "{{ states(usage_counter) | is_number }}"
+          - condition: template
+            value_template: >-
+              {% set last = expand(usage_counter) | map(attribute='last_changed') | first | default(none) %}
+              {{ (min_gap_minutes | float(0)) <= 0 or last is none
+                 or (now() - last).total_seconds() >= (min_gap_minutes | float(0)) * 60 }}
+        sequence:
+          # set_value rather than increment, so the helper's step setting can't
+          # change what one use is worth.
+          - action: counter.set_value
+            target:
+              entity_id: "{{ usage_counter }}"
+            data:
+              value: "{{ (states(usage_counter) | int) + 1 }}"
+
+      - alias: A runtime sample found it running
+        conditions:
+          - condition: trigger
+            id: runtime_tick
+          - condition: template
+            value_template: "{{ states(usage_counter) | is_number }}"
+        sequence:
+          - action: counter.set_value
+            target:
+              entity_id: "{{ usage_counter }}"
+            data:
+              value: "{{ (states(usage_counter) | int) + tick_minutes }}"
+
+      - alias: Daily check - has it become due?
+        conditions:
+          - condition: trigger
+            id: daily_check
+          - condition: template
+            value_template: "{{ is_state(due_flag, 'off') }}"
+        sequence:
+          # Read now, not at trigger time: a queued run must not act on a count
+          # that a swap recorded just before it has already reset.
+          - variables:
+              count: "{{ states(usage_counter) | int if states(usage_counter) | is_number else none }}"
+              replaced_ts: "{{ state_attr(replaced_helper, 'timestamp') if state_attr(replaced_helper, 'has_date') == true else none }}"
+          - variables:
+              # Compare unrounded: 59 minutes is not 1.0 hour.
+              used: "{{ none if count is none else (count / 60 if track_mode == 'runtime' else count) }}"
+              limit: "{{ (runtime_limit_hours if track_mode == 'runtime' else use_limit) | float(0) }}"
+              use_frac: "{{ none if used is none or limit <= 0 else used / limit }}"
+              age_days: "{{ none if replaced_ts is not number else ((as_timestamp(now()) - replaced_ts) / 86400) | round(0, 'floor') | int }}"
+              age_cap: >-
+                {% set base = age_limit_days | int(0) %}
+                {% set short = seasonal_age_days | int(0) %}
+                {% if short > 0 and (now().month | string) in (seasonal_months | map('string') | list) %}
+                  {{ [base, short] | select('gt', 0) | min }}
+                {% else %}
+                  {{ base }}
+                {% endif %}
+              age_frac: "{{ none if age_days is none or age_cap | int(0) <= 0 else age_days / age_cap }}"
+              due: "{{ (use_frac is number and use_frac >= 1) or (age_frac is number and age_frac >= 1) }}"
+              limited_by: "{{ 'age' if (age_frac or 0) > (use_frac or 0) else ('runtime' if track_mode == 'runtime' else 'use') }}"
+          - condition: template
+            value_template: "{{ due }}"
+          - variables:
+              due_title: "{{ label }} is due"
+              due_message: >-
+                {% set unit = 'hours' if track_mode == 'runtime' else 'uses' %}
+                {% set u = (used | round(0, 'floor') | int) ~ ' of ' ~ (limit | int) ~ ' ' ~ unit if used is not none else 'usage unknown' %}
+                {% if age_days is none %}{% set a = 'age unknown' %}
+                {% elif age_cap | int(0) > 0 %}{% set a = age_days ~ ' of ' ~ age_cap ~ ' days' %}
+                {% else %}{% set a = age_days ~ ' days old' %}{% endif %}
+                {{ u }}, {{ a }} - due by {{ limited_by }}. The count starts
+                over when you record the swap, not before.
+          - action: input_boolean.turn_on
+            target:
+              entity_id: "{{ due_flag }}"
+          - if:
+              - condition: template
+                value_template: "{{ todo_list != '' }}"
+            then:
+              - action: todo.get_items
+                target:
+                  entity_id: "{{ todo_list }}"
+                data:
+                  status:
+                    - needs_action
+                    - completed
+                response_variable: todo_now
+                continue_on_error: true
+              - variables:
+                  mine: >-
+                    {% set items = todo_now[todo_list]['items'] if todo_now is defined and todo_now is mapping and todo_list in todo_now else [] %}
+                    {% set ns = namespace(out=[]) %}
+                    {% for i in items if i.summary == todo_text %}
+                      {% set ns.out = ns.out + [{'uid': i.uid, 'status': i.status}] %}
+                    {% endfor %}
+                    {{ ns.out }}
+              # Recording the swap already takes this item off the list. Clear
+              # any ticked copy again here, in case the list was unreachable
+              # at that moment, so while the part is due a completed item with
+              # this text can only mean this one was ticked.
+              - if:
+                  - condition: template
+                    value_template: "{{ mine | selectattr('status', 'eq', 'completed') | list | count > 0 }}"
+                then:
+                  - action: todo.remove_item
+                    target:
+                      entity_id: "{{ todo_list }}"
+                    data:
+                      item: "{{ mine | selectattr('status', 'eq', 'completed') | map(attribute='uid') | list }}"
+                    continue_on_error: true
+              - if:
+                  - condition: template
+                    value_template: "{{ mine | selectattr('status', 'eq', 'needs_action') | list | count == 0 }}"
+                then:
+                  - action: todo.add_item
+                    target:
+                      entity_id: "{{ todo_list }}"
+                    data:
+                      item: "{{ todo_text }}"
+                    continue_on_error: true
+          # Side by side, so neither can cost the other its run. A notify
+          # service that no longer exists (replacing a phone renames
+          # notify.mobile_app_*) stops a run even with continue_on_error, and
+          # the flag is already on, so a skipped step would never run later.
+          # parallel lets every branch finish before it reports an error.
+          - parallel:
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_service == 'notify.persistent_notification' }}"
+                then:
+                  - action: persistent_notification.create
+                    data:
+                      title: "{{ due_title }}"
+                      message: "{{ due_message }}"
+                      notification_id: "consumable_due_{{ usage_counter }}"
+                else:
+                  - action: !input notify_service
+                    continue_on_error: true
+                    data:
+                      title: "{{ due_title }}"
+                      message: "{{ due_message }}"
+              - sequence: !input on_due_action
+
+      # A ticked item becomes the same done event a script would fire, so there
+      # is one reset path. If the item was deleted rather than ticked, or is
+      # still open, this branch stops here and nothing is reset.
+      - alias: The to-do item was ticked
+        conditions:
+          - condition: trigger
+            id: todo_changed
+        sequence:
+          - action: todo.get_items
+            target:
+              entity_id: "{{ todo_list }}"
+            data:
+              status:
+                - needs_action
+                - completed
+            response_variable: todo_now
+            continue_on_error: true
+          - condition: template
+            value_template: >-
+              {% set items = todo_now[todo_list]['items'] if todo_now is defined and todo_now is mapping and todo_list in todo_now else [] %}
+              {% set mine = items | selectattr('summary', 'eq', todo_text) | list %}
+              {{ mine | selectattr('status', 'eq', 'needs_action') | list | count == 0
+                 and mine | selectattr('status', 'eq', 'completed') | list | count > 0 }}
+          - event: consumable_replaced
+            event_data:
+              counter: "{{ usage_counter }}"
+              source: todo
+
+      - alias: The swap was recorded
+        conditions:
+          - condition: trigger
+            id:
+              - done_button
+              - done_event
+        sequence:
+          - variables:
+              count: "{{ states(usage_counter) | int if states(usage_counter) | is_number else none }}"
+              replaced_ts: "{{ state_attr(replaced_helper, 'timestamp') if state_attr(replaced_helper, 'has_date') == true else none }}"
+          - variables:
+              was: >-
+                {% set u = 'usage unknown' if count is none else
+                   ((count / 60) | round(0) | int ~ ' hours' if track_mode == 'runtime' else count ~ ' uses') %}
+                {% set a = 'age unknown' if replaced_ts is not number else
+                   (((as_timestamp(now()) - replaced_ts) / 86400) | round(0, 'floor') | int) ~ ' days' %}
+                {{ u }}, {{ a }}
+          # set_value 0, not reset: reset returns to the helper's initial value,
+          # which is only 0 if it was created that way.
+          - action: counter.set_value
+            target:
+              entity_id: "{{ usage_counter }}"
+            data:
+              value: 0
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: "{{ replaced_helper }}"
+            data:
+              timestamp: "{{ as_timestamp(now()) }}"
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ due_flag }}"
+          # Take this part's item off the list, open or ticked. A button or
+          # event swap would otherwise leave "Replace ..." open, and a ticked
+          # copy left behind would read as a fresh tick next cycle if the
+          # due-time clear can't reach the list. The flag is already off, so
+          # the list change this makes fails the todo_changed condition.
+          - if:
+              - condition: template
+                value_template: "{{ todo_list != '' }}"
+            then:
+              - action: todo.get_items
+                target:
+                  entity_id: "{{ todo_list }}"
+                data:
+                  status:
+                    - needs_action
+                    - completed
+                response_variable: todo_now
+                continue_on_error: true
+              - variables:
+                  old_copies: >-
+                    {% set items = todo_now[todo_list]['items'] if todo_now is defined and todo_now is mapping and todo_list in todo_now else [] %}
+                    {{ items | selectattr('summary', 'eq', todo_text) | map(attribute='uid') | select('string') | list }}
+              - if:
+                  - condition: template
+                    value_template: "{{ old_copies | count > 0 }}"
+                then:
+                  - action: todo.remove_item
+                    target:
+                      entity_id: "{{ todo_list }}"
+                    data:
+                      item: "{{ old_copies }}"
+                    continue_on_error: true
+          - action: persistent_notification.dismiss
+            data:
+              notification_id: "consumable_due_{{ usage_counter }}"
+          # Side by side for the same reason as on the due side: a missing
+          # notify service must not cost the on-done action its run.
+          - parallel:
+              - if:
+                  - condition: template
+                    value_template: "{{ notify_on_done }}"
+                then:
+                  - action: !input notify_service
+                    continue_on_error: true
+                    data:
+                      title: "{{ label }} replaced"
+                      message: "Swap recorded. The old one had {{ was }}. Count reset to 0."
+                else:
+                  - action: persistent_notification.create
+                    data:
+                      title: "{{ label }} replaced"
+                      message: "Swap recorded. The old one had {{ was }}. Count reset to 0."
+                      notification_id: "consumable_done_{{ usage_counter }}"
+              - sequence: !input on_done_action
