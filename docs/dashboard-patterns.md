@@ -37,8 +37,8 @@ person holding it.
 
 [`dashboard/templates/busy-button.yaml`](../dashboard/templates/busy-button.yaml)
 
-Every scene tile used to be a dead rectangle: tap "Goodnight" (nine lights,
-four switches, each with `continue_on_error`, so an unreachable bulb burns its
+Every scene tile used to be a dead rectangle: tap "Goodnight" (a dozen lights
+and switches, each with `continue_on_error`, so an unreachable bulb burns its
 full timeout) and nothing acknowledges the tap until the room changes. So
 people tap again, which runs the script again.
 
@@ -77,7 +77,7 @@ Measured on a real browser against a live dashboard, not reasoned about.
    section on a new row. Design for three columns on a 1280-wide tablet.
 4. **A card nested in `custom_fields` resolves templates in the parent's
    context.** `entity` is the parent's entity (or nothing). One `entity.state`
-   in a nested field threw `ButtonCardJSTemplateError` across all seven views.
+   in a nested field threw `ButtonCardJSTemplateError` across every view.
    Inside nested fields use `states['...']` or `hass...`, never bare `entity`.
 5. **HA caches YAML dashboard config in memory, and refresh does not bust
    it.** Not a browser cache - no service worker involved; it is server side.
@@ -102,8 +102,8 @@ further it pushes that section off the fold.
 ## 5. What a one-screen counter panel has room for
 
 Home on a 1280x800 tablet fits a greeting line, a one-line briefing strip,
-a thermostat card, six scene tiles, seven half-height room tiles and a media
-block - and not the dinner card, which is the card the household uses most.
+a thermostat card, a row of scene tiles, half-height room tiles and a media
+block - and not the card the household uses most.
 Halving room tiles saved 457px and un-stretching the nav rail saved 221px;
 the remaining ~535px is a design decision (what earns a place on a glance
 surface), not a tuning problem. Decide that explicitly rather than letting

@@ -81,7 +81,7 @@ blueprint:
           mode: box
     label:
       name: What to call this in the notification
-      description: 'e.g. "Driveway camera stream", "Weather station uplink".'
+      description: 'e.g. "Camera stream", "Weather station uplink".'
       selector:
         text: {}
     paged_flag:
