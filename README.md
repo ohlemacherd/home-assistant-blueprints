@@ -90,7 +90,7 @@ Also in the repo:
 
 Once a day (or twice), makes the small decisions for the house - what matters
 today, what can wait, what needs a nudge before an event - so nobody merges
-five apps in their head at 6:30am. It gathers what the house actually knows -
+five apps in their head before breakfast. It gathers what the house actually knows -
 the calendars the household can act on, a to-do list (dated items only), any
 sensor states you name - and hands it to an AI Task entity with a short set of
 judgment rules. Back comes a briefing shaped like a person wrote it: one
@@ -103,7 +103,7 @@ means it learns your household in a week.
 ### Why this is the one that matters
 
 A day is mostly micro-decisions. Is today's schedule tight? Does anything need
-buying before Saturday? Is it worth mentioning that the guest room is cold?
+buying before Saturday? Is it worth mentioning that one room is running cold?
 This makes those calls once, first thing, so nobody in the house has to. The
 rules that stop it turning into a status report are the product, and they are
 an input: *mention something only if it would change what the reader does
@@ -444,7 +444,7 @@ within a hysteresis band of its target. Does nothing while the system is
 idle - a vent stays exactly where it last was rather than being forced open
 or shut for no reason. Hot and cold rooms even out without the vent vendor's
 cloud writing your thermostat behind your back, and battery vents stop
-chattering - one guest room went from 204 moves a day to single digits.
+chattering - a vent that was moving hundreds of times a day settles to a handful.
 
 Written for anyone running smart vents (Flair, Keen, or similar) in a
 manual/non-cloud mode alongside a smart thermostat. This automation only

@@ -123,8 +123,8 @@ blueprint:
         On by default. The room-temperature trigger fires on every reading
         while the system runs; without this guard the same position is
         re-sent every few minutes, which for cloud-connected vents means a
-        cloud call and, for battery vents, a motor tick each time (one
-        setup measured 200+ moves a day this way). Turn it off only if your
+        cloud call and, for battery vents, a motor tick each time (easily
+        hundreds of moves a day). Turn it off only if your
         vents report their position unreliably - some Flair firmware does -
         in which case a repeated command is the price of correctness.
       default: true
