@@ -114,7 +114,7 @@ blueprint:
     audience:
       name: Who this is for
       description: One line the model addresses the briefing to.
-      default: a two-adult household reading this on a kitchen tablet and their phones
+      default: the people in this household, reading it on a shared screen or their phones
       selector:
         text: {}
     rules:
