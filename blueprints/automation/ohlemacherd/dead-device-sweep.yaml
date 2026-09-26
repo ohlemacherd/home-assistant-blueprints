@@ -1,0 +1,463 @@
+blueprint:
+  name: Dead Device Sweep
+  description: >
+    Once an hour, finds the devices that have quietly stopped reporting -
+    unavailable or unknown for longer than a hold time - and tells you only
+    when that list changes. Battery devices rarely die by reporting 3%; a
+    motion sensor, a door contact or a remote just goes unavailable one
+    night and stays that way. By default this sweeps every battery-powered
+    device Home Assistant knows about, so there is nothing to list by hand;
+    it can also sweep one label or a list of entities.
+
+
+    Why not a plain "notify when anything is unavailable" automation, or an
+    unavailable-entities sensor? Those repeat the whole list every run, or
+    fire on every change in the count, so two dead sensors become a push
+    every hour until someone finds batteries, and one flapping sensor pages
+    every time it drops and comes back. This one remembers the last dead
+    set and stays silent while it is unchanged. It pages each device at
+    most once per 24 hours, however often it flaps. It logs a full recovery
+    instead of pushing it. And when several devices from one integration go
+    dead together - a hub, a bridge or a Zigbee stick is down, not three
+    batteries - it sends one line for the integration instead of one line
+    per device.
+
+
+    Needs two Text helpers (Settings -> Devices & services -> Helpers ->
+    Create helper -> Text) with the maximum length raised to 255. Example
+    push: "New: Hallway motion sensor; zha integration - 4 devices at once
+    (check the hub or the integration before the batteries). Still dead,
+    already reported: Office remote."
+
+
+    Known limit: a Text helper holds at most 255 characters, which is about
+    seven devices. Past that the stored list ends in "+N more", so a swap
+    among the devices beyond the cap does not count as a change, a device
+    that falls out of the 24-hour memory can page again early, and a device
+    beyond the cap that is still dead after a restart can be reported as
+    recovered and then as new.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/dead-device-sweep.yaml
+  input:
+    scope_mode:
+      name: What to sweep
+      description: >-
+        Battery devices needs no setup: every sensor or binary sensor with
+        the battery device class is watched. A label sweeps every entity
+        with that label, plus every entity of each device with that label.
+        A list sweeps exactly the entities you pick.
+      default: battery
+      selector:
+        select:
+          mode: list
+          options:
+            - label: Battery devices (anything with the battery device class)
+              value: battery
+            - label: Everything with one label
+              value: label
+            - label: A list of entities
+              value: entities
+    scope_label:
+      name: Label (optional)
+      description: Only used when "What to sweep" is set to a label.
+      default: ""
+      selector:
+        label: {}
+    scope_entities:
+      name: Entities (optional)
+      description: Only used when "What to sweep" is set to a list of entities.
+      default: []
+      selector:
+        entity:
+          multiple: true
+    exclude_regex:
+      name: Leave out entity ids matching (optional)
+      description: >-
+        A regular expression searched in each entity id. Anything that
+        matches is never reported. Use it for portable or sleepy devices
+        whose dropouts are normal, e.g. phone|tablet|watch|earbuds. Leave
+        empty to sweep everything in scope.
+      default: ""
+      selector:
+        text: {}
+    dead_hours:
+      name: Hours without a report before a device counts as dead
+      description: >-
+        A device counts as dead only when every entity it has in scope has
+        been unavailable or unknown for this long, and none of its other
+        entities has reported in that time. 1 is enough for
+        mains-powered devices; battery devices that check in every hour or
+        two are happier at 2-4. A device already on the list stays on it
+        while it is still unavailable, so a restart or an integration reload
+        (which starts every entity's clock over) does not read as a
+        recovery.
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 72
+          step: 1
+          unit_of_measurement: hours
+          mode: box
+    check_minute:
+      name: Minute past each hour to sweep
+      description: Off the hour by default, so it does not pile onto automations that run at :00.
+      default: 23
+      selector:
+        number:
+          min: 0
+          max: 59
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    group_threshold:
+      name: Dead devices from one integration that mean the integration is down
+      description: >-
+        When at least this many dead devices share one integration (or every
+        device in scope from that integration is dead, if there are at least
+        two), they are reported as one line - "zha integration - 4 devices at
+        once" - instead of one line each. 0 turns grouping off.
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 50
+          step: 1
+          mode: box
+    last_set_helper:
+      name: "\"Last dead set\" helper"
+      description: >-
+        A Text helper dedicated to this automation (Settings -> Devices &
+        services -> Helpers -> Create helper -> Text). Set its maximum length
+        to 255 in the helper's settings; the default of 100 holds about two
+        devices. It remembers the dead set from the last sweep. Create one
+        per instance of this blueprint - don't share it.
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+    paged_helper:
+      name: "\"Paged in the last 24 hours\" helper"
+      description: >-
+        A second Text helper, also dedicated to this automation and also set
+        to a maximum length of 255. It remembers which devices have already
+        paged today, so a flapping device pages once a day at most. Don't
+        share it, and don't reuse the helper above.
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+    notify_service:
+      name: Notify service
+      description: >-
+        Where a changed dead set is paged - e.g. notify.mobile_app_your_phone,
+        a notify group, or a script that takes title and message (such as one
+        made from this repo's Routed Notifier blueprint). The default is built
+        in and shows under Settings -> Notifications.
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    notify_on_recovery:
+      name: Also push a notification when everything has recovered?
+      description: >-
+        Off by default - a full recovery, and any change that has nothing new
+        to page, is written to a persistent notification (Settings ->
+        Notifications) that replaces itself, instead of being pushed.
+      default: false
+      selector:
+        boolean: {}
+
+# One sweep at a time. An hourly run finishes in well under a second.
+mode: single
+max_exceeded: silent
+
+variables:
+  scope_mode: !input scope_mode
+  scope_label: !input scope_label
+  scope_entities: !input scope_entities
+  exclude_regex: !input exclude_regex
+  dead_hours: !input dead_hours
+  group_threshold: !input group_threshold
+  last_set_helper: !input last_set_helper
+  paged_helper: !input paged_helper
+  notify_on_recovery: !input notify_on_recovery
+  log_id: "dead_device_sweep_{{ this.entity_id | default('automation') }}"
+  last_set_prev: >-
+    {%- set s = states(last_set_helper) -%}
+    {{ '' if s in ['unknown', 'unavailable'] else s }}
+  # The keys in the last set, without the "=N" counts and the "+N more" tail.
+  prev_keys: >-
+    {{ (last_set_prev | string).split(',') | map('trim') | map('regex_replace', '=[0-9]+$', '')
+       | reject('search', '^[+][0-9]+ more$') | reject('eq', '') | list }}
+  # Stage 1 - read Home Assistant. One row per dead DEVICE (entities are
+  # folded into their device; an entity with no device stands alone), plus a
+  # count of in-scope devices per integration for the sibling rule below.
+  # A device is dead when every entity it has in scope is unavailable or
+  # unknown past the hold time. A device already in the last set stays dead
+  # while every entity is still unavailable or unknown, whatever its age: a
+  # restart or an integration reload starts every entity's clock over, and
+  # without this a sweep an hour later would read every dead device as
+  # recovered, and one hold time later as new. Domains whose normal state is
+  # "unknown" (a button never pressed, an event never fired) never count.
+  # A device is alive, whatever its in-scope entities say, while any other
+  # entity of it has a real state reported inside the hold time: a battery
+  # sensor can sit at "unknown" for hours after a restart while the device's
+  # motion and temperature sensors keep reporting. Those other entities only
+  # prove life; they never make a device dead. Update entities, and readings
+  # that mean the device is gone (a node status of "dead", a connectivity
+  # sensor that is off), don't prove life.
+  sweep_raw: >-
+    {%- set cutoff = now() - timedelta(hours=dead_hours | float(2)) -%}
+    {%- set skip_domains = ['button', 'input_button', 'event', 'scene', 'notify'] -%}
+    {%- set not_life = ['unavailable', 'unknown', '', 'dead', 'offline', 'disconnected', 'unreachable', 'not_home'] -%}
+    {%- if scope_mode == 'label' -%}
+      {%- set ids = (label_entities(scope_label) + (label_devices(scope_label) | map('device_entities') | sum(start=[]))) if scope_label else [] -%}
+      {%- set pool = states | selectattr('entity_id', 'in', ids) | list -%}
+    {%- elif scope_mode == 'entities' -%}
+      {%- set ids = [scope_entities] if scope_entities is string else (scope_entities or []) -%}
+      {%- set pool = states | selectattr('entity_id', 'in', ids) | list -%}
+    {%- else -%}
+      {%- set pool = ((states.sensor | list) + (states.binary_sensor | list)) | selectattr('attributes.device_class', 'eq', 'battery') | list -%}
+    {%- endif -%}
+    {%- set pool = pool | rejectattr('domain', 'in', skip_domains) | list -%}
+    {%- if exclude_regex | trim != '' -%}
+      {%- set pool = pool | rejectattr('entity_id', 'search', exclude_regex | trim) | list -%}
+    {%- endif -%}
+    {#- Sorted, so a device is always named by the same entity: the order of
+        "states" is not stable across a restart or a reload. -#}
+    {%- set ns = namespace(devs={}, rows=[], scope={}, oids={}) -%}
+    {%- for s in pool | sort(attribute='entity_id') -%}
+      {%- set did = device_id(s.entity_id) -%}
+      {%- set dk = did if did else s.entity_id -%}
+      {%- set is_down = s.state in ['unavailable', 'unknown'] -%}
+      {%- set is_dead = is_down and s.last_changed < cutoff -%}
+      {%- if dk in ns.devs -%}
+        {%- set cur = ns.devs[dk] -%}
+      {%- else -%}
+        {%- set oid = s.entity_id.split('.', 1)[1] | regex_replace('_battery(_level|_low|_state)?$', '') -%}
+        {%- set ns.oids = dict(ns.oids, **{oid: ns.oids.get(oid, 0) + 1}) -%}
+        {%- set cur = {'e': s.entity_id, 'o': oid, 'did': did, 'total': 0, 'down': 0, 'dead': 0} -%}
+      {%- endif -%}
+      {%- set ns.devs = dict(ns.devs, **{dk: dict(cur, total=cur['total'] + 1, down=cur['down'] + (1 if is_down else 0), dead=cur['dead'] + (1 if is_dead else 0))}) -%}
+    {%- endfor -%}
+    {%- for dk, d in ns.devs.items() -%}
+      {%- set ce = config_entry_id(d['e']) -%}
+      {%- set dom = (config_entry_attr(ce, 'domain') if ce else '') or '' -%}
+      {%- if dom -%}
+        {%- set ns.scope = dict(ns.scope, **{dom: ns.scope.get(dom, 0) + 1}) -%}
+      {%- endif -%}
+      {#- The memory key: the object id minus a battery suffix. One that
+          another device in scope shares, or one longer than 24 characters,
+          gets a checksum of the device added (a long one is first cut to its
+          head and tail), so no two devices share a key. -#}
+      {%- set oid = d['o'] -%}
+      {%- if oid | length <= 24 and ns.oids[oid] == 1 -%}
+        {%- set key = oid -%}
+      {%- else -%}
+        {%- set hs = namespace(h=0) -%}
+        {%- for c in dk -%}
+          {%- set hs.h = (hs.h * 31 + (c | ord)) % 16777216 -%}
+        {%- endfor -%}
+        {%- set key = (oid if oid | length <= 17 else oid[:10] ~ '~' ~ oid[-6:]) ~ '~' ~ '%06x' | format(hs.h) -%}
+      {%- endif -%}
+      {%- set known = key in prev_keys or (dom != '' and ('@' ~ dom[:23]) in prev_keys) -%}
+      {%- if d['down'] == d['total'] and (d['dead'] == d['total'] or known) -%}
+        {%- set did = d['did'] -%}
+        {%- set ents = device_entities(did) if did else [] -%}
+        {%- set lv = namespace(alive=false) -%}
+        {%- for o in expand(ents) if not lv.alive and o.entity_id in ents and o.domain not in skip_domains + ['update'] -%}
+          {%- if o.state not in not_life and o.last_reported > cutoff and not (o.domain == 'binary_sensor' and o.state == 'off' and o.attributes.get('device_class') == 'connectivity') -%}
+            {%- set lv.alive = true -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {%- if not lv.alive -%}
+          {%- set name = ((device_attr(did, 'name_by_user') or device_attr(did, 'name')) if did else '') or state_attr(d['e'], 'friendly_name') or d['e'] -%}
+          {%- set ns.rows = ns.rows + [{'k': key, 'n': name, 'd': dom, 'g': ('@' ~ dom[:23]) if dom else ''}] -%}
+        {%- endif -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ {'rows': ns.rows | sort(attribute='k'), 'scope': ns.scope} }}
+  # Stage 2 - group. At least group_threshold dead devices from one
+  # integration, or every in-scope device of it (two or more), is one line
+  # about the integration: when all of a hub's devices go dark together it is
+  # the hub, and when only one does while its siblings still report it is
+  # that device.
+  items: >-
+    {%- set k_min = group_threshold | int(0) -%}
+    {%- set ns = namespace(out=[], grouped=[]) -%}
+    {%- if k_min > 0 -%}
+      {%- for dom, rows in sweep_raw['rows'] | rejectattr('d', 'eq', '') | groupby('d') -%}
+        {%- set n = rows | count -%}
+        {%- set total = sweep_raw['scope'].get(dom, n) -%}
+        {%- if n >= 2 and (n >= k_min or n >= total) -%}
+          {%- set ns.out = ns.out + [{'k': '@' ~ dom[:23], 'n': dom, 'c': n, 'whole': n >= total, 'g': ''}] -%}
+          {%- set ns.grouped = ns.grouped + [dom] -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+    {%- for r in sweep_raw['rows'] if r['d'] not in ns.grouped -%}
+      {%- set ns.out = ns.out + [{'k': r['k'], 'n': r['n'], 'c': 1, 'whole': false, 'g': r['g']}] -%}
+    {%- endfor -%}
+    {{ ns.out | sort(attribute='k') }}
+  # Stage 3 - memory. The dead set as "key,key,@integration=N", cut to the
+  # helper's own maximum length (255 at most) with "+N more" at the end.
+  last_set_now: >-
+    {%- set cap = [state_attr(last_set_helper, 'max') | int(100), 255] | min -%}
+    {%- set ns = namespace(sigs=[], out=[], used=0, full=false) -%}
+    {%- for i in items -%}
+      {%- set ns.sigs = ns.sigs + [i['k'] ~ ('=' ~ i['c'] if i['c'] > 1 else '')] -%}
+    {%- endfor -%}
+    {%- set whole = ns.sigs | join(',') -%}
+    {%- if whole | length <= cap -%}
+      {{ whole }}
+    {%- else -%}
+      {%- for s in ns.sigs -%}
+        {%- if not ns.full and ns.used + (s | length) + 1 <= cap - 11 -%}
+          {%- set ns.out = ns.out + [s] -%}
+          {%- set ns.used = ns.used + (s | length) + 1 -%}
+        {%- else -%}
+          {%- set ns.full = true -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ ((ns.out + ['+' ~ (ns.sigs | count - ns.out | count) ~ ' more']) | join(','))[:cap] }}
+    {%- endif -%}
+  # "key:hour,key:hour" - hour is hours since the epoch, about 30 characters
+  # an entry, so seven or eight fit in 255.
+  now_h: "{{ (now().timestamp() / 3600) | int }}"
+  paged_prev: >-
+    {%- set s = states(paged_helper) -%}
+    {%- set ns = namespace(m={}) -%}
+    {%- if s not in ['unknown', 'unavailable', ''] -%}
+      {%- for part in s.split(',') -%}
+        {%- set kv = part.split(':') -%}
+        {%- if kv | count == 2 and kv[0] | trim != '' and kv[1] | trim | is_number -%}
+          {%- set ns.m = dict(ns.m, **{kv[0] | trim: kv[1] | trim | int}) -%}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endif -%}
+    {{ ns.m }}
+  paged_recent: >-
+    {%- set ns = namespace(l=[]) -%}
+    {%- for k, h in paged_prev.items() if (h | int(0)) > (now_h | int) - 24 -%}
+      {%- set ns.l = ns.l + [k] -%}
+    {%- endfor -%}
+    {{ ns.l }}
+  # A device also counts as already paged while its integration's group line
+  # is in the 24-hour memory, so a group that shrinks (four dead, then two
+  # of them back) does not page the two still dead as new.
+  new_items: "{{ items | rejectattr('k', 'in', paged_recent) | rejectattr('g', 'in', paged_recent) | list }}"
+  still_items: "{{ items | reject('in', new_items) | list }}"
+  # Newest entries first, so when the helper is full the oldest fall off.
+  paged_next: >-
+    {%- set cap = [state_attr(paged_helper, 'max') | int(100), 255] | min -%}
+    {%- set new_keys = new_items | map(attribute='k') | list -%}
+    {%- set ns = namespace(l=[], out=[], used=0, full=false) -%}
+    {%- for k in new_keys -%}
+      {%- set ns.l = ns.l + [k ~ ':' ~ now_h] -%}
+    {%- endfor -%}
+    {%- for kh in paged_prev.items() | sort(attribute='1', reverse=true) -%}
+      {%- if (kh[1] | int(0)) > (now_h | int) - 24 and kh[0] not in new_keys -%}
+        {%- set ns.l = ns.l + [kh[0] ~ ':' ~ kh[1]] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {%- for e in ns.l -%}
+      {%- set add = (e | length) + (1 if ns.out else 0) -%}
+      {%- if not ns.full and ns.used + add <= cap -%}
+        {%- set ns.out = ns.out + [e] -%}
+        {%- set ns.used = ns.used + add -%}
+      {%- else -%}
+        {%- set ns.full = true -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ ns.out | join(',') }}
+  new_text: >-
+    {%- set ns = namespace(l=[]) -%}
+    {%- for i in new_items -%}
+      {%- if i['c'] > 1 -%}
+        {%- set ns.l = ns.l + [i['n'] ~ ' integration - ' ~ i['c'] ~ ' devices at once' ~ (', every one in scope' if i['whole'] else '') ~ ' (check the hub or the integration before the batteries)'] -%}
+      {%- else -%}
+        {%- set ns.l = ns.l + [i['n']] -%}
+      {%- endif -%}
+    {%- endfor -%}
+    {{ ns.l | join('; ') }}
+  all_text: >-
+    {%- set ns = namespace(l=[]) -%}
+    {%- for i in items -%}
+      {%- set ns.l = ns.l + [i['n'] ~ (' integration (' ~ i['c'] ~ ' devices)' if i['c'] > 1 else '')] -%}
+    {%- endfor -%}
+    {{ ns.l[:10] | join('; ') ~ ('; +' ~ (ns.l | count - 10) ~ ' more' if ns.l | count > 10 else '') }}
+  still_text: >-
+    {%- set ns = namespace(l=[]) -%}
+    {%- for i in still_items -%}
+      {%- set ns.l = ns.l + [i['n'] ~ (' integration (' ~ i['c'] ~ ' devices)' if i['c'] > 1 else '')] -%}
+    {%- endfor -%}
+    {{ ns.l[:8] | join('; ') ~ ('; +' ~ (ns.l | count - 8) ~ ' more' if ns.l | count > 8 else '') }}
+
+triggers:
+  - trigger: time_pattern
+    minutes: !input check_minute
+    id: sweep
+
+conditions:
+  - condition: template
+    value_template: "{{ (last_set_now | string) != (last_set_prev | string) }}"
+
+actions:
+  - choose:
+      # Something is dead that has not paged in the last 24 hours: page it.
+      - conditions:
+          - condition: template
+            value_template: "{{ new_items | count > 0 }}"
+        sequence:
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              title: "Dead devices: {{ new_items | count }} new"
+              message: >-
+                New (no report for {{ dead_hours | int }} h+): {{ new_text }}.
+                {%- if still_items | count > 0 %} Still dead, already reported: {{ still_text }}.{% endif %}
+          - action: input_text.set_value
+            target:
+              entity_id: !input paged_helper
+            data:
+              value: "{{ paged_next }}"
+      # The set changed, but every member already paged today (a flapping
+      # device, a partial recovery, an integration group growing): log it.
+      - conditions:
+          - condition: template
+            value_template: "{{ items | count > 0 }}"
+        sequence:
+          - action: persistent_notification.create
+            data:
+              title: Dead devices changed - nothing new to page
+              message: >-
+                Dead now (no report for {{ dead_hours | int }} h+): {{ all_text }}.
+                Every one was already reported in the last 24 hours.
+              notification_id: "{{ log_id }}"
+      # Everything recovered. Quiet unless asked otherwise.
+      - conditions:
+          - condition: template
+            value_template: "{{ last_set_prev != '' }}"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ notify_on_recovery }}"
+            then:
+              - action: !input notify_service
+                continue_on_error: true
+                data:
+                  title: Dead devices - all recovered
+                  message: "Everything the sweep had flagged is reporting again (was: {{ last_set_prev }})."
+            else:
+              - action: persistent_notification.create
+                data:
+                  title: Dead devices - all recovered
+                  message: "Everything the sweep had flagged is reporting again (was: {{ last_set_prev }})."
+                  notification_id: "{{ log_id }}"
+  - action: input_text.set_value
+    target:
+      entity_id: !input last_set_helper
+    data:
+      value: "{{ last_set_now }}"
