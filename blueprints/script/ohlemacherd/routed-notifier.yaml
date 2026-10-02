@@ -1,0 +1,603 @@
+blueprint:
+  name: Routed Notifier with Quiet Hours and a Daily Page Budget
+  description: >
+    One script that every automation calls instead of a notify service, so
+    the whole house shares one set of rules about when a phone is allowed to
+    buzz. Each call names a route: `page` pushes now, `brief` sends a
+    normal-priority push (usually with action buttons), `log` only records,
+    and `critical` skips every gate. Quiet hours, a mute switch, the phone's
+    own Do Not Disturb and a hard daily page budget never throw a message
+    away - they hold it in a record (the logbook, an event, and optionally
+    the notification bell), so nothing is lost and nobody is woken. A blank
+    message is dropped and recorded (except on the critical route, which
+    never drops), so the automation that produced it can be found. Every
+    call returns what happened - `sent`,
+    `demoted_quiet`, `demoted_budget`, `dropped_blank`, `logged` or
+    `undelivered` - as a response variable.
+
+
+    Why not a quiet-hours condition in each automation? Twenty automations
+    each carrying their own copy drift apart, and none of them knows how
+    many times the phone has already buzzed today. A cap that silently drops
+    is worse than no cap - you never learn what you missed - so over-budget
+    pages are held in the record instead, and an automation that misfires
+    forty times in an afternoon costs you the day's budget, not forty
+    buzzes. The budget resets itself: the script keeps today's date in a
+    helper and zeroes the counter on the first call of a new day, so there
+    is no midnight automation to forget and a restart can't confuse it.
+
+
+    Needs a notify service, one Counter helper and one Text (or Date)
+    helper. Example: an automation calls `script.routed_notifier` with
+    `route: page`, `title: Garage door open` and `message: Open for 20
+    minutes.` - at 23:30 that is held as `demoted_quiet`; at noon it pushes
+    and spends one page of the day's budget. The other blueprints in this
+    repo can point their notify service at the script unchanged: each of
+    their messages becomes a high-priority `page` (so each stage of the
+    left-open reminder spends a page, and one door left open can use the
+    default budget of 3), and the Companion app's `clear_notification`
+    passes straight through.
+
+
+    Known limits: `sent` means the message was handed to the notify service -
+    Home Assistant can't see whether the phone showed it. A held message is
+    not re-sent when quiet hours end; it waits in the record. The script
+    handles one call at a time and holds at most 25 at once (the one running
+    plus those waiting). A call beyond that is skipped - critical included -
+    with only a "Maximum number of runs exceeded" warning in the log, and a
+    critical call waits its turn behind the calls ahead of it.
+  domain: script
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/script/ohlemacherd/routed-notifier.yaml
+  input:
+    delivery:
+      name: Delivery
+      icon: mdi:send
+      input:
+        notify_service:
+          name: Notify service
+          description: >-
+            Where a message goes when it is allowed to push - e.g.
+            notify.mobile_app_your_phone, or a notify group that reaches
+            several phones. The default is built in and shows under Settings
+            -> Notifications, which is fine for trying this out.
+          default: notify.persistent_notification
+          selector:
+            text: {}
+        companion_app:
+          name: Is the notify service the Companion app?
+          description: >-
+            Controls only the urgency fields. On (default), pages and
+            critical messages carry priority high and ttl 0 (Android) and
+            interruption-level time-sensitive (iOS), so they arrive promptly
+            instead of waiting on the phone's battery saver. Briefs go at
+            normal priority either way. Turn this off for a notify service
+            that isn't the Companion app and might reject fields it doesn't
+            know. Tags, images, action buttons and any extra data a caller
+            passes are always forwarded.
+          default: true
+          selector:
+            boolean: {}
+        brief_without_actions:
+          name: What happens to a brief with no action buttons
+          description: >-
+            A brief is meant to be a quiet tap-target. When a caller sends
+            one without actions, this decides what happens, and neither
+            choice is silent: push it at normal priority (default), or hold
+            it in the record as undelivered so the caller gets fixed.
+          default: push
+          selector:
+            select:
+              mode: list
+              options:
+                - label: Push it at normal priority
+                  value: push
+                - label: Hold it in the record as undelivered
+                  value: record
+        critical_breaks_dnd:
+          name: Should critical messages ring through Do Not Disturb?
+          description: >-
+            Off by default. On adds the Companion app's alarm channel
+            (Android, channel alarm_stream) and a critical sound (iOS - the
+            app must be allowed Critical Alerts) to the critical route only,
+            so a critical message rings even on a silenced phone. Leave it
+            off unless every critical caller deserves that.
+          default: false
+          selector:
+            boolean: {}
+    budget:
+      name: Daily page budget
+      icon: mdi:counter
+      input:
+        budget_counter:
+          name: Page counter helper
+          description: >-
+            A Counter helper dedicated to this script (Settings -> Devices &
+            services -> Helpers -> Create helper -> Counter), with the
+            default step of 1, no minimum and no maximum. It counts today's
+            pages; the script sets it back to 0 on the first call of each
+            day. Create one per instance of this blueprint - don't share it.
+            If it can't be read, pages go through rather than being held.
+          selector:
+            entity:
+              filter:
+                - domain: counter
+        daily_budget:
+          name: Pages allowed per day
+          description: >-
+            Once this many pages have pushed today, further pages are held
+            in the record for the rest of the day. Critical messages never
+            count and are never held by the budget. If real alerts start
+            being held, move a chatty caller to brief or log rather than
+            raising this.
+          default: 3
+          selector:
+            number:
+              min: 1
+              max: 50
+              step: 1
+              unit_of_measurement: pages
+              mode: box
+        budget_day_helper:
+          name: Budget-day stamp helper
+          description: >-
+            A Text helper (Settings -> Devices & services -> Helpers ->
+            Create helper -> Text) or a Date helper (Create helper -> Date
+            and/or time, with a date - a time-only one can't hold the day,
+            and the budget then never holds a page) dedicated to this
+            script. The script writes today's date into it; whenever the
+            stamp isn't today, the day's count starts again from 0 and the
+            counter above is set back to 0. That is why no midnight
+            automation is needed, and why a restart can't reset or skip the
+            budget.
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - input_text
+                    - input_datetime
+    quiet:
+      name: Quiet hours, mute and Do Not Disturb
+      icon: mdi:sleep
+      input:
+        quiet_mode:
+          name: When are quiet hours?
+          description: >-
+            During quiet hours, pages and briefs are held in the record
+            instead of pushed. Critical messages still go through.
+          default: times
+          selector:
+            select:
+              options:
+                - label: Between the two times below
+                  value: times
+                - label: While the quiet entity below is on
+                  value: entity
+                - label: Either of the above
+                  value: either
+                - label: Never - no quiet hours
+                  value: never
+        quiet_start:
+          name: Quiet hours start
+          default: "22:00:00"
+          selector:
+            time: {}
+        quiet_end:
+          name: Quiet hours end
+          description: >-
+            The window may cross midnight. A start equal to the end means no
+            window.
+          default: "07:00:00"
+          selector:
+            time: {}
+        quiet_entity:
+          name: Quiet entity (optional)
+          description: >-
+            Anything that is on while the house should be quiet - a Schedule
+            helper with different weekday and weekend nights, a Toggle
+            someone flips for a nap, or a binary sensor. Only used when the
+            quiet-hours choice above includes it.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - schedule
+                    - input_boolean
+                    - binary_sensor
+        mute_toggle:
+          name: Mute toggle (optional)
+          description: >-
+            A Toggle helper. While it's on, everything except critical
+            messages is held in the record - quiet hours on demand, for a
+            meeting, a film or a house guest.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain: input_boolean
+        dnd_sensor:
+          name: Phone Do Not Disturb sensor (optional)
+          description: >-
+            The Companion app's Do Not Disturb sensor on Android
+            (sensor.your_phone_do_not_disturb_sensor - enable it in the
+            app's sensor settings) or its Focus sensor on iOS
+            (binary_sensor.your_phone_focus). While it reads one of the
+            states below, pages and briefs are held. If it's unavailable,
+            messages go through.
+          default: ""
+          selector:
+            entity:
+              filter:
+                - domain:
+                    - sensor
+                    - binary_sensor
+        dnd_states:
+          name: Do Not Disturb states to respect
+          description: >-
+            Android reports priority_only, alarms_only or total_silence;
+            the iOS Focus sensor reports on.
+          default:
+            - priority_only
+            - alarms_only
+            - total_silence
+            - "on"
+          selector:
+            select:
+              multiple: true
+              custom_value: true
+              options:
+                - priority_only
+                - alarms_only
+                - total_silence
+                - "on"
+    record:
+      name: The record (where held messages go)
+      icon: mdi:notebook-outline
+      collapsed: true
+      input:
+        log_to_logbook:
+          name: Write every call to the logbook?
+          description: >-
+            On by default. One logbook line per call, under this script,
+            with its outcome and the automation that called it - so "why did
+            I never get that?" has an answer.
+          default: true
+          selector:
+            boolean: {}
+        fire_event:
+          name: Fire a routed_notifier event for every call?
+          description: >-
+            On by default. The event carries the outcome, route, reason,
+            title, message and tag, for anything you build on top - a
+            morning digest of held messages, a count per outcome, a file
+            log.
+          default: true
+          selector:
+            boolean: {}
+        held_to_bell:
+          name: Also put held messages in the notification bell?
+          description: >-
+            On by default. Anything held by quiet hours, mute, Do Not
+            Disturb or the budget, and any brief held as undelivered, also
+            appears under Settings -> Notifications - one entry per tag (or
+            title), so a repeat replaces the last one. Log-route messages
+            never go there.
+          default: true
+          selector:
+            boolean: {}
+
+# queued, not parallel: two pages arriving together must not both read the
+# counter as "one left" and both push.
+mode: queued
+max: 25
+
+fields:
+  title:
+    name: Title
+    description: The notification title. Optional.
+    example: Garage door open
+    selector:
+      text: {}
+  message:
+    name: Message
+    description: >-
+      The notification text. A blank message is dropped and recorded as
+      dropped_blank - except on the critical route, which never drops.
+    required: true
+    example: Open for 20 minutes.
+    selector:
+      text:
+        multiline: true
+  route:
+    name: Route
+    description: >-
+      page - push now, if quiet hours and the daily budget allow. brief -
+      push at normal priority, not counted (give it actions). log - record
+      only. critical - push past every gate. Default page.
+    default: page
+    selector:
+      select:
+        options:
+          - page
+          - brief
+          - log
+          - critical
+  actions:
+    name: Action buttons
+    description: >-
+      Companion app actions - a list of action/title pairs. Buttons passed
+      inside data (data.actions, the Companion app's own style) count too.
+    example: '[{"action": "CLOSE_GARAGE", "title": "Close it"}]'
+    selector:
+      object: {}
+  tag:
+    name: Tag
+    description: >-
+      A later message with the same tag replaces the earlier banner. A tag
+      passed inside data (data.tag) works too.
+    example: garage_door
+    selector:
+      text: {}
+  image:
+    name: Image
+    description: An image URL or a /api/camera_proxy/camera.front_door path to attach.
+    selector:
+      text: {}
+  data:
+    name: Extra push data
+    description: >-
+      Anything else the notify service understands (sticky, channel,
+      clickAction, url...). Merged over the urgency fields; tag, image and
+      actions above win over the same keys here.
+    selector:
+      object: {}
+
+sequence:
+  # Inputs are mapped here rather than in script-level variables: those act
+  # as defaults a caller could override, and the budget must not be one.
+  - variables:
+      companion_app: !input companion_app
+      brief_without_actions: !input brief_without_actions
+      critical_breaks_dnd: !input critical_breaks_dnd
+      budget_counter: !input budget_counter
+      daily_budget: !input daily_budget
+      budget_day_helper: !input budget_day_helper
+      quiet_mode: !input quiet_mode
+      quiet_start: !input quiet_start
+      quiet_end: !input quiet_end
+      quiet_entity: !input quiet_entity
+      mute_toggle: !input mute_toggle
+      dnd_sensor: !input dnd_sensor
+      dnd_states: !input dnd_states
+      log_to_logbook: !input log_to_logbook
+      fire_event: !input fire_event
+      held_to_bell: !input held_to_bell
+  - variables:
+      # An unknown route is treated as a page: a typo should reach a phone,
+      # not vanish.
+      r: >-
+        {% set x = route | default('page', true) | string | lower | trim %}
+        {{ x if x in ['page', 'brief', 'log', 'critical'] else 'page' }}
+      # Companion app commands (clear a banner, remove a channel...) are not
+      # messages: they pass straight through, uncounted and unrecorded.
+      is_command: >-
+        {% set m = message | default('', true) | string | trim %}
+        {{ m in ['clear_notification', 'remove_channel', 'request_location_update',
+                 'clear_badge', 'update_complications', 'update_widgets']
+           or m.startswith('command_') }}
+      blank: "{{ (message | default('', true) | string | trim) == '' }}"
+      extra: >-
+        {% set d = data | default({}, true) %}
+        {{ d if d is mapping else {} }}
+      # Buttons may come in the actions field or, Companion app style, in
+      # data.actions (how a notify.mobile_app_* call moved over is written).
+      action_list: >-
+        {% set a = actions | default(extra.get('actions', []), true) %}
+        {{ [a] if a is mapping else (a if (a is sequence and a is not string) else []) }}
+      in_window: >-
+        {% set s = (quiet_start | string)[:5] %}
+        {% set e = (quiet_end | string)[:5] %}
+        {% set n = now().strftime('%H:%M') %}
+        {{ false if s == e else ((s <= n < e) if s < e else (n >= s or n < e)) }}
+      quiet_reason: >-
+        {{ 'quiet_hours' if (quiet_mode in ['times', 'either'] and in_window)
+           else 'quiet_entity' if (quiet_mode in ['entity', 'either'] and quiet_entity
+                                   and is_state(quiet_entity, 'on'))
+           else 'mute' if (mute_toggle and is_state(mute_toggle, 'on'))
+           else 'dnd' if (dnd_sensor and states(dnd_sensor) in dnd_states)
+           else '' }}
+      # The budget day is a date stamp, not the counter's last_changed (a
+      # restart rewrites that). An unreadable stamp never resets the count.
+      new_day: >-
+        {% set s = states(budget_day_helper) | string %}
+        {{ s != 'unavailable' and s[:10] != now().date().isoformat() }}
+      used: "{{ 0 if new_day else (states(budget_counter) | int(0)) }}"
+      budget: "{{ daily_budget | int(3) }}"
+      outcome: >-
+        {{ 'sent' if is_command
+           else 'sent' if r == 'critical'
+           else 'dropped_blank' if blank
+           else 'logged' if r == 'log'
+           else 'demoted_quiet' if quiet_reason != ''
+           else ('sent' if (action_list | count > 0 or brief_without_actions == 'push')
+                 else 'undelivered') if r == 'brief'
+           else 'demoted_budget' if used >= budget
+           else 'sent' }}
+      reason: >-
+        {{ 'companion_command' if is_command
+           else 'critical' if r == 'critical'
+           else 'blank_message' if blank
+           else 'log_route' if r == 'log'
+           else quiet_reason if quiet_reason != ''
+           else ('has_actions' if action_list | count > 0 else 'no_actions') if r == 'brief'
+           else 'over_budget' if used >= budget
+           else 'within_budget' }}
+      counts: "{{ outcome == 'sent' and r == 'page' and not is_command }}"
+      pages_today: "{{ used + 1 if counts else used }}"
+      push_data: >-
+        {% set d = {} %}
+        {% if companion_app and r in ['page', 'critical'] and not is_command %}
+          {% set d = dict(d, priority='high', ttl=0, push={'interruption-level': 'time-sensitive'}) %}
+        {% endif %}
+        {% if companion_app and critical_breaks_dnd and r == 'critical' and not is_command %}
+          {% set d = dict(d, channel='alarm_stream',
+                push={'interruption-level': 'critical',
+                      'sound': {'name': 'default', 'critical': 1, 'volume': 1.0}}) %}
+        {% endif %}
+        {% set d = dict(d, **extra) %}
+        {% set t = tag | default('', true) | string | trim %}
+        {% if t != '' %}{% set d = dict(d, tag=t) %}{% endif %}
+        {% set i = image | default('', true) | string | trim %}
+        {% if i != '' %}{% set d = dict(d, image=i) %}{% endif %}
+        {% if action_list | count > 0 %}{% set d = dict(d, actions=action_list) %}{% endif %}
+        {{ d }}
+      # A critical message never drops: a blank body becomes the title.
+      payload: >-
+        {% set t = title | default('', true) | string | trim %}
+        {% set m = message | default('', true) | string %}
+        {% if m | trim == '' %}
+          {% set m = t if t != '' else 'Critical alert' %}
+          {% set t = '' %}
+        {% endif %}
+        {% set p = {'message': m} %}
+        {% if t != '' %}{% set p = dict(p, title=t) %}{% endif %}
+        {% if push_data | count > 0 %}{% set p = dict(p, data=push_data) %}{% endif %}
+        {{ p }}
+      record_line: >-
+        {% set t = title | default('', true) | string | trim %}
+        {% set m = message | default('', true) | string | trim %}
+        {{ (outcome ~ ' (' ~ reason ~ ', ' ~ r ~ '): ' ~ t
+            ~ (' - ' if t != '' and m != '' else '') ~ m)[:500] }}
+
+  - if:
+      - condition: template
+        value_template: "{{ outcome == 'sent' }}"
+    then:
+      - action: !input notify_service
+        continue_on_error: true
+        data: "{{ payload }}"
+
+  # The record. Every call except a Companion app command lands here.
+  - if:
+      - condition: template
+        value_template: "{{ not is_command }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ log_to_logbook }}"
+        then:
+          - action: logbook.log
+            continue_on_error: true
+            data:
+              name: "{{ this.attributes.friendly_name | default('Routed notifier', true) }}"
+              message: "{{ record_line }}"
+              entity_id: "{{ this.entity_id }}"
+      - if:
+          - condition: template
+            value_template: "{{ fire_event }}"
+        then:
+          - event: routed_notifier
+            event_data:
+              script: "{{ this.entity_id }}"
+              outcome: "{{ outcome }}"
+              route: "{{ r }}"
+              reason: "{{ reason }}"
+              title: "{{ title | default('', true) }}"
+              message: "{{ message | default('', true) }}"
+              tag: "{{ tag | default(extra.get('tag', ''), true) }}"
+              pages_today: "{{ pages_today }}"
+      - if:
+          - condition: template
+            value_template: >-
+              {{ held_to_bell and outcome in ['demoted_quiet', 'demoted_budget', 'undelivered'] }}
+        then:
+          - action: persistent_notification.create
+            continue_on_error: true
+            data:
+              notification_id: >-
+                {% set t = tag | default(extra.get('tag', ''), true) | string | trim %}
+                {% set h = title | default('', true) | string | trim %}
+                routed_notifier_{{ t if t != '' else (h | slugify if h != '' else context.id) }}
+              title: "Held: {{ title | default('Notification', true) }}"
+              message: >-
+                {% set why = {'quiet_hours': 'quiet hours',
+                              'quiet_entity': 'quiet hours',
+                              'mute': 'muted',
+                              'dnd': 'the phone was on Do Not Disturb',
+                              'over_budget': 'the daily page budget was used up',
+                              'no_actions': 'a brief with no action buttons'} %}
+                {{ message | default('', true) }}
+
+
+                Held at {{ now().strftime('%H:%M') }} - {{ why.get(reason, reason) }}.
+
+  # The budget's bookkeeping runs last, after delivery and the record, so a
+  # helper that refuses a write can cost the count but never the message.
+  # This call already decided with the count it read (0 on a new day). First
+  # call of a new day: zero the counter and stamp today; then count the page.
+  - if:
+      - condition: template
+        value_template: "{{ new_day }}"
+    then:
+      # counter.set_value raises below the counter's minimum, and
+      # continue_on_error can't catch that; reset gets as close as it can.
+      - if:
+          - condition: template
+            value_template: "{{ (state_attr(budget_counter, 'minimum') | int(0)) <= 0 }}"
+        then:
+          - action: counter.set_value
+            continue_on_error: true
+            target:
+              entity_id: !input budget_counter
+            data:
+              value: 0
+        else:
+          - action: counter.reset
+            continue_on_error: true
+            target:
+              entity_id: !input budget_counter
+      # A time-only Date/time helper can't take a date: set_datetime would
+      # raise "Nothing to set", which continue_on_error can't catch either.
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: >-
+                  {{ budget_day_helper.startswith('input_datetime.')
+                     and state_attr(budget_day_helper, 'has_date') == true }}
+            sequence:
+              - action: input_datetime.set_datetime
+                continue_on_error: true
+                target:
+                  entity_id: !input budget_day_helper
+                data:
+                  date: "{{ now().date().isoformat() }}"
+          - conditions:
+              - condition: template
+                value_template: "{{ budget_day_helper.startswith('input_text.') }}"
+            sequence:
+              - action: input_text.set_value
+                continue_on_error: true
+                target:
+                  entity_id: !input budget_day_helper
+                data:
+                  value: "{{ now().date().isoformat() }}"
+  - if:
+      - condition: template
+        value_template: "{{ counts }}"
+    then:
+      - action: counter.increment
+        continue_on_error: true
+        target:
+          entity_id: !input budget_counter
+
+  - variables:
+      result:
+        outcome: "{{ outcome }}"
+        route: "{{ r }}"
+        reason: "{{ reason }}"
+        pages_today: "{{ pages_today }}"
+        daily_budget: "{{ budget }}"
+  - stop: Routed
+    response_variable: result

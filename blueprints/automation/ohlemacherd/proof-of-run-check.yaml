@@ -1,0 +1,376 @@
+blueprint:
+  name: Proof-of-Run Equipment Check
+  description: >
+    For equipment you are supposed to test now and then but that also runs
+    by itself - a sump pump, a standby generator that exercises weekly, a
+    well pump, a water softener's regeneration, a dehumidifier, a robot
+    vacuum. Every real run is written into a date/time helper. A real run
+    counts as the test: it can complete your "test the equipment" chore
+    for you, at most once every N days, so the chore history reads as a
+    record of the equipment working. Only when nothing has run for a
+    while does it ask a person to test it by hand.
+
+
+    Why not a calendar reminder? A calendar can't tell a pump that ran
+    fifty times last month from one that hasn't moved since spring, and
+    that difference is the whole reason to test it. A monthly reminder
+    nags about the healthy pump and says nothing extra about the seized
+    one. Here the ask comes from silence, not from the date.
+
+
+    A sensor that stops reporting counts as silence, with its own wording:
+    no readings means no proof either way, and only a test by hand
+    restores it. A reading that comes back from unavailable already
+    running still counts as a run, on purpose - an integration that drops
+    out often would otherwise throw good evidence away. The run is written
+    to the helper before any action of yours is called, so a flapping
+    sensor can't fire a burst of completions; your actions run last, so a
+    failing one can't swallow the notification. A new last-run helper
+    holds midnight on the day it was created, so silence counts from
+    then. If the helper can't be read as a date (deleted, unavailable, or
+    a time-only helper) the daily check can't count silence and never
+    asks, and nothing warns you - so use a Date and time helper.
+
+
+    Setting the idle threshold: open the equipment's history, find the
+    longest gap between runs in normal use, and set roughly three times
+    that. Long enough that a dry spell doesn't trip it, short enough that
+    a stuck float or a seized motor does.
+
+
+    Known limit: the check asks only on exact day counts - the day the
+    silence reaches the threshold, then every reminder interval after it.
+    A missed day is not made up the next morning; the ask comes at the
+    next reminder instead, up to that many days late. A day is missed
+    when Home Assistant is down at check time, when the automation is
+    turned off that day, when the threshold is lowered after the silence
+    has already passed it, or when the last-run helper is set by hand to
+    a date already past the threshold.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/proof-of-run-check.yaml
+  input:
+    label:
+      name: What to call this equipment
+      description: 'Used in the notification text, e.g. "Sump pump", "Standby generator".'
+      selector:
+        text: {}
+    run_entity:
+      name: Entity that shows it running (option A)
+      description: >-
+        Fill in this OR the power sensor below. An entity whose state
+        means "running right now" - a running/power binary_sensor, a robot
+        vacuum (running state "cleaning"), a generator's status sensor, a
+        switch that is only on while it runs. Leave empty if you use the
+        power sensor instead.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain:
+                - binary_sensor
+                - sensor
+                - switch
+                - vacuum
+                - lawn_mower
+                - humidifier
+                - fan
+                - valve
+                - select
+                - input_boolean
+    running_state:
+      name: "\"Running\" state"
+      description: >-
+        The exact state of the entity above that means it is running -
+        on for most binary sensors and switches, cleaning for a robot
+        vacuum. Case-sensitive. Ignored when you use the power sensor.
+      default: "on"
+      selector:
+        text: {}
+    power_sensor:
+      name: Power sensor (option B)
+      description: >-
+        Fill in this OR the entity above. A live power reading - a
+        power-monitoring smart plug or a current clamp on the circuit. A
+        sensor that reports in kW is converted to watts. Leave empty if
+        you use option A. Both may be set; either one counts as a run.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: power
+    power_threshold:
+      name: Running power threshold (W)
+      description: >-
+        Draw above this many watts counts as running (a kW reading is
+        converted first). Set it well above the idle reading and below
+        what it draws while running - one look at the sensor's history
+        during a real run shows the gap. Only used with the power sensor.
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 5000
+          step: 1
+          unit_of_measurement: W
+          mode: box
+    min_run_seconds:
+      name: Minimum run time
+      description: >-
+        It has to stay running this long to count, so a sensor blip or a
+        run that aborted straight away isn't taken as proof. 0 counts the
+        moment it starts. A sump pump cycle is often under a minute; a
+        robot vacuum might use 900 (15 minutes) so a spot clean doesn't
+        count.
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 14400
+          step: 5
+          unit_of_measurement: seconds
+          mode: box
+    last_run_helper:
+      name: Last-run helper
+      description: >-
+        A Date and time helper dedicated to this automation (Settings ->
+        Devices & services -> Helpers -> Create helper -> Date and/or time
+        -> Date and time). Every real run writes the time here, and the
+        daily check counts silence from it. A new helper starts at
+        midnight today, so the silence clock starts the day you create
+        it. Create one per instance of this blueprint - don't share it.
+        If you set it by hand, don't backdate it past the idle threshold:
+        the ask would wait for the next reminder.
+      selector:
+        entity:
+          filter:
+            - domain: input_datetime
+    idle_threshold_days:
+      name: Days of silence before asking for a test by hand
+      description: >-
+        If nothing has run for this many days, the daily check asks a
+        person to test it. Set roughly three times the longest normal gap
+        you see in the equipment's history. The default suits something
+        that runs at least weekly.
+      default: 21
+      selector:
+        number:
+          min: 1
+          max: 365
+          step: 1
+          unit_of_measurement: days
+          mode: box
+    remind_every_days:
+      name: Ask again every ... days while it stays silent
+      description: >-
+        After the first ask, repeat it this often until the equipment runs
+        (a test by hand makes it run, which stops the asks). The repeat is
+        also what makes up a missed ask (see Known limit), so it can't be
+        turned off. Your "when a test is due" action runs on every ask, so
+        make it safe to repeat, or set a long interval.
+      default: 7
+      selector:
+        number:
+          min: 1
+          max: 90
+          step: 1
+          unit_of_measurement: days
+          mode: box
+    proof_helper:
+      name: Last auto-complete helper (optional)
+      description: >-
+        A second Date and time helper, dedicated to this automation. It
+        records when a run last counted as the test, which is how the
+        "at most once every N days" rule holds even when the equipment
+        runs several times an hour. After creating it, set it once to any
+        date in the past: a new helper starts at midnight today, and left
+        like that the first auto-complete waits the full interval. It must
+        be a different helper from the last-run helper, and a Date and time
+        one: a time-only or missing helper never auto-completes. Leave
+        empty if you only want the ask-on-silence half.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_datetime
+    complete_every_days:
+      name: Minimum days between auto-completions
+      description: >-
+        A run counts as the test at most this often, so the record reads
+        as proof it works, not as a diary of every cycle.
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 365
+          step: 1
+          unit_of_measurement: days
+          mode: box
+    on_complete_action:
+      name: When a real run counts as the test (optional)
+      description: >-
+        What to do when a run counts as the test - complete a chore in a
+        chore tracker, tick a to-do item, log it. Runs after the auto-
+        complete helper is written. Needs the auto-complete helper above.
+        The variable label is available to templates here.
+      default: []
+      selector:
+        action: {}
+    on_due_action:
+      name: When a test by hand is due (optional)
+      description: >-
+        Anything besides the notification - surface a chore, add a to-do
+        item, flash a dashboard light. Runs after the notification, on
+        every ask. The variables label, idle_days and no_telemetry are
+        available to templates here.
+      default: []
+      selector:
+        action: {}
+    test_hint:
+      name: How to test it by hand (optional)
+      description: >-
+        One sentence appended to the ask, e.g. "Pour a bucket of water into
+        the pit and watch it cycle." Leave empty for a generic line.
+      default: ""
+      selector:
+        text: {}
+    notify_service:
+      name: Notify service
+      description: >-
+        Where the ask goes, e.g. notify.mobile_app_your_phone, a notify
+        group, or a script of your own that takes title and message. The
+        default is built in and shows under Settings -> Notifications.
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    check_time:
+      name: Daily check time
+      description: When to look for silence, once a day. Pick a time someone is awake to act on it.
+      default: "09:00:00"
+      selector:
+        time: {}
+
+# queued: a run that lands while the daily check (or your own action) is still
+# going must not be dropped - a lost stamp is lost evidence. Runs are handled one
+# at a time, so the second of a burst reads the stamp the first one wrote.
+mode: queued
+max: 5
+max_exceeded: silent
+
+trigger_variables:
+  run_entity: !input run_entity
+  running_state: !input running_state
+  power_sensor: !input power_sensor
+  power_threshold: !input power_threshold
+
+variables:
+  label: !input label
+  last_run_helper: !input last_run_helper
+  proof_helper: !input proof_helper
+  idle_threshold_days: !input idle_threshold_days
+  remind_every_days: !input remind_every_days
+  complete_every_days: !input complete_every_days
+  test_hint: !input test_hint
+
+triggers:
+  # No "from": a reading that comes back from unavailable already running is
+  # still a real observation that it ran. An unavailable power reading is never
+  # treated as a number. A sensor that reports in kW is scaled to watts, so the
+  # threshold is always in watts.
+  - trigger: template
+    value_template: >-
+      {{ (run_entity != '' and states(run_entity) == running_state)
+         or (power_sensor != '' and states(power_sensor) | is_number
+             and states(power_sensor) | float
+                 * (1000 if state_attr(power_sensor, 'unit_of_measurement') == 'kW' else 1)
+                 > power_threshold | float) }}
+    for:
+      seconds: !input min_run_seconds
+    id: ran
+  - trigger: time
+    at: !input check_time
+    id: daily_check
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: ran
+        sequence:
+          - action: input_datetime.set_datetime
+            target:
+              entity_id: !input last_run_helper
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+          # Read live, not from trigger-time variables: a queued second run must
+          # see the stamp the first one just wrote. Only a helper that holds a
+          # real date can pass: a time-only, deleted or unavailable helper never
+          # records the stamp, so letting it through would complete the chore on
+          # every run.
+          - if:
+              - condition: template
+                value_template: >-
+                  {%- set p = states(proof_helper) if proof_helper != '' else '' -%}
+                  {%- set t = as_timestamp(p, none) if strptime(p[:10], '%Y-%m-%d', none) is not none else none -%}
+                  {{ t is not none and (as_timestamp(now()) - t) >= (complete_every_days | int) * 86400 }}
+            then:
+              # Stamp FIRST. If your action fails, the worst case is one skipped
+              # interval; stamping after it would let a flapping sensor fire it
+              # again and again.
+              - action: input_datetime.set_datetime
+                target:
+                  entity_id: "{{ proof_helper }}"
+                data:
+                  datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+              - sequence: !input on_complete_action
+      - conditions:
+          - condition: trigger
+            id: daily_check
+          # With neither evidence source filled in, silence proves nothing.
+          - condition: template
+            value_template: "{{ run_entity != '' or power_sensor != '' }}"
+        sequence:
+          - variables:
+              # Calendar days, so the day count moves by exactly one per daily
+              # check (a daylight-saving night can't skip or repeat a day).
+              # A helper that can't be read as a date (unknown, unavailable,
+              # time-only) gives -1, and -1 never asks.
+              idle_days: >-
+                {%- set s = states(last_run_helper) -%}
+                {%- set d = strptime(s[:10], '%Y-%m-%d', none) -%}
+                {%- if d is not none and as_timestamp(s, 0) > 0 -%}
+                  {{ (now().date() - d.date()).days }}
+                {%- else -%}
+                  -1
+                {%- endif -%}
+              # Silent because blind: every evidence source you filled in is
+              # unavailable or unknown right now.
+              no_telemetry: >-
+                {%- set sources = [run_entity, power_sensor] | reject('eq', '') | list -%}
+                {{ sources | count > 0
+                   and sources | map('states') | reject('in', ['unavailable', 'unknown']) | list | count == 0 }}
+          - condition: template
+            value_template: >-
+              {% set idle = idle_days | int(-1) %}
+              {% set first = idle_threshold_days | int %}
+              {% set every = remind_every_days | int %}
+              {{ idle >= first
+                 and (idle == first or (every > 0 and (idle - first) % every == 0)) }}
+          - action: !input notify_service
+            continue_on_error: true
+            data:
+              title: "{{ label }}: time to test it by hand"
+              message: >-
+                {%- if no_telemetry -%}
+                No readings are coming from {{ label }}, and its last recorded
+                run was {{ idle_days }} days ago - so there is no proof it
+                works either way.
+                {%- else -%}
+                {{ label }} hasn't run in {{ idle_days }} days. That may just
+                be a quiet spell, or it may be stuck - only a test tells you
+                which.
+                {%- endif %}
+                {{ test_hint if test_hint else 'Run it by hand and watch it work.' }}
+          - sequence: !input on_due_action

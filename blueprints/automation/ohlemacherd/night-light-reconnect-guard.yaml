@@ -1,0 +1,228 @@
+blueprint:
+  name: Night Light Reconnect Guard
+  description: >
+    Skip this one if your lights never show "unavailable" in their history -
+    it only acts on a light coming back from a network dropout.
+
+
+    Keeps a room dark overnight when its smart bulbs drop off the network and
+    come back ON by themselves. A Hue lamp at the edge of the mesh, a Zigbee
+    bulb behind a busy router, a Wi-Fi bulb on a congested access point - many
+    of them report "on" when they reconnect, so a room you put to bed at
+    eleven is lit again at two with nobody in it. This watches for exactly
+    that: a light going from unavailable straight to on, inside a night
+    window, while the room is meant to be dark and nobody is there. It waits
+    a few seconds for the bulb to settle, checks the room again, and turns
+    that one light back off.
+
+
+    Why not the bulb's own "power-on behaviour" setting? It only covers a real
+    power cut. A bulb that merely lost its network link never lost power, so
+    the setting never applies, and it reconnects in whatever state it thinks
+    it is in. And why not "turn off any light that comes on at night"? That
+    one fights the person who got up at 3am. This guard triggers only on
+    unavailable -> on, which a person at a smart switch, a remote or the app
+    does not produce (they go off -> on). It also ignores Home Assistant
+    restarting or reloading an integration: the moment of "unavailable" those
+    show is a placeholder, not a dropout, so a lamp that never dropped is left
+    alone. It stands down when the change
+    carries a user (a dashboard, the app, a voice assistant) or came from
+    another automation or script (a motion light), and it does nothing while
+    any occupancy sensor says someone is in the room.
+
+
+    Needs: the lights to guard and at least one occupancy, motion or presence
+    sensor covering the room. The presence check is what protects the one
+    human action that does look like a reconnect - flipping a wall switch to
+    power a smart bulb that was cut at the wall. A sensor that is itself
+    unavailable counts as someone being there, so the guard stands down
+    rather than guess. Optional: one entity whose state means "this room has
+    been put to bed" - the ceiling light being off, a bedtime Toggle helper
+    being on - so the guard only acts once the room was made dark on
+    purpose.
+
+
+    Example: guard light.living_room_lamp and light.reading_lamp from 23:00
+    to 06:00, only while light.living_room_ceiling is off and
+    binary_sensor.living_room_motion is off.
+
+
+    Known limit: it cannot see what a light was before it dropped out. A lamp
+    someone left on deliberately in an empty room is turned off after a
+    reconnect too, unless the "room is dark" signal says otherwise. And a
+    bulb that bounces back on in the same second you turn it off, without
+    ever going unavailable, is not a reconnect and this will not see it.
+    Nor will it act on a reconnect within five seconds of a script turning
+    that light off: Home Assistant still credits that change to the
+    script. If your goodnight script has either problem, give it a second
+    light.turn_off about ten seconds after the first.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/night-light-reconnect-guard.yaml
+  input:
+    lights:
+      name: Lights to guard
+      description: >-
+        The bulbs or lamps that come back on after a dropout. Only the one
+        that reconnected is turned off; the others are left alone.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: light
+    window_start:
+      name: Night window starts
+      description: >-
+        The guard only acts between this time and the end time below. The
+        window may cross midnight. Setting start and end to the same time
+        guards all day.
+      default: "23:00:00"
+      selector:
+        time: {}
+    window_end:
+      name: Night window ends
+      default: "06:00:00"
+      selector:
+        time: {}
+    occupancy_sensors:
+      name: Occupancy or motion sensors
+      description: >-
+        Sensors covering the room these lights are in. If any of them is on,
+        or unavailable, the guard does nothing. This is also what keeps it
+        from turning off a bulb that someone just powered at the wall switch -
+        that looks exactly like a reconnect.
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: binary_sensor
+              device_class: occupancy
+            - domain: binary_sensor
+              device_class: motion
+            - domain: binary_sensor
+              device_class: presence
+    dark_entity:
+      name: "\"Room is dark\" signal (optional)"
+      description: >-
+        An entity whose state means this room has been put to bed on
+        purpose - the room's main ceiling light, a group of its other
+        lights, or a bedtime Toggle helper. Not a group that contains the
+        lights guarded here: it reads "on" the moment one of them reconnects,
+        and the guard would never act. The guard only acts while this entity
+        is in the state below. Leave empty to rely on the night window and
+        the sensors alone.
+      default: ""
+      selector:
+        entity: {}
+    dark_state:
+      name: "\"Room is dark\" state"
+      description: >-
+        The state of the signal above that means "dark on purpose" - off for
+        a light or light group, on for a bedtime helper. Exact match. Ignored
+        when the signal is empty.
+      default: "off"
+      selector:
+        text: {}
+    settle_seconds:
+      name: Seconds to wait before turning it off
+      description: >-
+        A bulb that has just reconnected often bounces once or twice more
+        within a few seconds. Waiting lets it settle, and gives the room
+        checks a second look before anything changes.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 120
+          step: 1
+          unit_of_measurement: seconds
+          mode: box
+    max_runs:
+      name: Most reconnects to handle at once
+      description: >-
+        Each reconnect gets its own correction, and they run side by side, so
+        each one only waits its own settle time. On a bad night several lamps
+        can drop out together; reconnects beyond this many in progress at
+        once are skipped silently. Home Assistant's own floor is 2.
+      default: 10
+      selector:
+        number:
+          min: 2
+          max: 50
+          step: 1
+          mode: box
+
+# parallel, not single: two lamps can reconnect seconds apart and each needs
+# its own correction. Not queued either: a queued run's settle delay only
+# starts when it leaves the queue, so the Nth lamp waits N x settle_seconds,
+# and a bulb that keeps bouncing can hold the queue full so another lamp's one
+# reconnect is dropped. In parallel each run holds a slot for settle_seconds
+# only; a second run for the same light finds it already off and stands down.
+# Capped so a pathological night can't pile up runs. There is no daily cap on
+# purpose - turning a light off in an empty room is harmless, and a cap would
+# give up on exactly the worst nights.
+mode: parallel
+max: !input max_runs
+max_exceeded: silent
+
+variables:
+  occupancy_sensors: !input occupancy_sensors
+  dark_entity: !input dark_entity
+  dark_state: !input dark_state
+
+triggers:
+  # unavailable -> on only. A person switching a lamp on goes off -> on,
+  # which this trigger cannot match.
+  - trigger: state
+    entity_id: !input lights
+    from: unavailable
+    to: "on"
+    id: reconnected_on
+
+conditions:
+  - condition: time
+    after: !input window_start
+    before: !input window_end
+  # HA writes a placeholder "unavailable" (restored: true) during a restart or
+  # an integration reload. Coming back from that is not a dropout.
+  - condition: template
+    value_template: "{{ not trigger.from_state.attributes.get('restored', false) }}"
+  # Never fight a person or another automation. A dashboard, app or voice
+  # turn-on carries a user_id; a script or automation (a motion light)
+  # carries a parent_id; a bulb reconnecting carries neither.
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state.context.user_id is none
+         and trigger.to_state.context.parent_id is none }}
+  # | string: a state typed as a number (a count sensor's 0) arrives as an int,
+  # and is_state() never matches an int against a string state.
+  - condition: template
+    value_template: "{{ dark_entity == '' or is_state(dark_entity, dark_state | string) }}"
+  # Every sensor must read off. On, unknown or unavailable all mean
+  # "someone might be there" - stand down rather than guess.
+  - condition: template
+    value_template: >-
+      {{ occupancy_sensors | count > 0
+         and occupancy_sensors | reject('is_state', 'off') | list | count == 0 }}
+
+actions:
+  - delay:
+      seconds: !input settle_seconds
+  # Look again: someone may have walked in during the wait, and a light going
+  # out in an occupied room is worse than one that stayed on. Also stand down
+  # if the light is no longer on, or a person or automation has taken it
+  # over since it reconnected.
+  - condition: template
+    value_template: >-
+      {% set light = states[trigger.entity_id] %}
+      {{ light is not none
+         and light.state == 'on'
+         and light.context.user_id is none
+         and light.context.parent_id is none
+         and (dark_entity == '' or is_state(dark_entity, dark_state | string))
+         and occupancy_sensors | reject('is_state', 'off') | list | count == 0 }}
+  - action: light.turn_off
+    continue_on_error: true
+    target:
+      entity_id: "{{ trigger.entity_id }}"
