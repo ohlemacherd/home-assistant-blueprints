@@ -1,0 +1,199 @@
+blueprint:
+  name: Consumable Life Used (Template Sensor)
+  description: >
+    Only worth importing if you use the Consumable Wear Tracker automation
+    blueprint in this repo (or keep a use counter and a replaced-on date
+    helper of your own) - this is its companion.
+
+
+    Creates one sensor: how much of a wearing part's life is used up, in
+    percent, measured against whichever of its two limits is nearer - the
+    usage limit (uses, or hours of runtime) or the age limit. An attribute
+    says which limit that is, so a dashboard can show "82%, by age" instead
+    of a bare number, and the others carry the count, the age and both
+    limits. It keeps climbing past 100% until the swap is recorded.
+
+
+    Why a sensor and not just the counter: a count of 143 means nothing on
+    a dashboard, and a part that has barely been used can still be close to
+    its age limit - the counter alone never shows that. Give it the same
+    limits you gave the automation; it does not read them from there.
+
+
+    Known limit: between counts the age side is recalculated every 15
+    minutes, so a newly created sensor can read unknown for up to 15
+    minutes.
+  domain: template
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/template/ohlemacherd/consumable-life-used.yaml
+  input:
+    sensor_name:
+      name: Sensor name
+      description: >-
+        Name for the resulting sensor. Use one per part, e.g. "Furnace
+        filter life used".
+      default: Consumable Life Used
+      selector:
+        text: {}
+    usage_counter:
+      name: Counter helper
+      description: The same Counter the automation counts into.
+      selector:
+        entity:
+          filter:
+            - domain: counter
+    replaced_helper:
+      name: Replaced-on date helper
+      description: >-
+        The same date helper the automation stamps. It must include a date;
+        with a time-only helper the age side reads as unknown.
+      selector:
+        entity:
+          filter:
+            - domain: input_datetime
+    track_mode:
+      name: What the counter holds
+      description: Match the automation's "How to count use".
+      default: uses
+      selector:
+        select:
+          options:
+            - label: Discrete uses
+              value: uses
+            - label: Runtime minutes
+              value: runtime
+    use_limit:
+      name: Usage limit (discrete uses)
+      description: Only used when the counter holds uses.
+      default: 180
+      selector:
+        number:
+          min: 1
+          max: 100000
+          step: 1
+          unit_of_measurement: uses
+          mode: box
+    runtime_limit_hours:
+      name: Runtime limit (runtime minutes)
+      description: Only used when the counter holds runtime minutes.
+      default: 500
+      selector:
+        number:
+          min: 1
+          max: 100000
+          step: 1
+          unit_of_measurement: hours
+          mode: box
+    age_limit_days:
+      name: Age limit
+      description: 0 means no age limit.
+      default: 90
+      selector:
+        number:
+          min: 0
+          max: 3650
+          step: 1
+          unit_of_measurement: days
+          mode: box
+    seasonal_months:
+      name: Months with a shorter age limit (optional)
+      default: []
+      selector:
+        select:
+          multiple: true
+          options:
+            - label: January
+              value: "1"
+            - label: February
+              value: "2"
+            - label: March
+              value: "3"
+            - label: April
+              value: "4"
+            - label: May
+              value: "5"
+            - label: June
+              value: "6"
+            - label: July
+              value: "7"
+            - label: August
+              value: "8"
+            - label: September
+              value: "9"
+            - label: October
+              value: "10"
+            - label: November
+              value: "11"
+            - label: December
+              value: "12"
+    seasonal_age_days:
+      name: Shorter age limit in those months
+      description: 0 turns it off. If it is higher than the normal age limit, the lower one wins.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 3650
+          step: 1
+          unit_of_measurement: days
+          mode: box
+
+triggers:
+  - trigger: state
+    entity_id:
+      - !input usage_counter
+      - !input replaced_helper
+  - trigger: time_pattern
+    minutes: "/15"
+  - trigger: homeassistant
+    event: start
+
+variables:
+  usage_counter: !input usage_counter
+  replaced_helper: !input replaced_helper
+  track_mode: !input track_mode
+  use_limit: !input use_limit
+  runtime_limit_hours: !input runtime_limit_hours
+  age_limit_days: !input age_limit_days
+  seasonal_months: !input seasonal_months
+  seasonal_age_days: !input seasonal_age_days
+  # An unavailable counter or a missing date is unknown, never 0.
+  count: "{{ states(usage_counter) | int if states(usage_counter) | is_number else none }}"
+  replaced_ts: "{{ state_attr(replaced_helper, 'timestamp') if state_attr(replaced_helper, 'has_date') == true else none }}"
+  # Unrounded, so 59 minutes against a 1-hour limit is 98%, not 100%.
+  used: "{{ none if count is none else (count / 60 if track_mode == 'runtime' else count) }}"
+  limit: "{{ (runtime_limit_hours if track_mode == 'runtime' else use_limit) | float(0) }}"
+  use_pct: "{{ none if used is none or limit <= 0 else (used / limit * 100) | round(1) }}"
+  age_days: "{{ none if replaced_ts is not number else ((as_timestamp(now()) - replaced_ts) / 86400) | round(0, 'floor') | int }}"
+  age_cap: >-
+    {% set base = age_limit_days | int(0) %}
+    {% set short = seasonal_age_days | int(0) %}
+    {% if short > 0 and (now().month | string) in (seasonal_months | map('string') | list) %}
+      {{ [base, short] | select('gt', 0) | min }}
+    {% else %}
+      {{ base }}
+    {% endif %}
+  age_pct: "{{ none if age_days is none or age_cap | int(0) <= 0 else (age_days / age_cap * 100) | round(1) }}"
+
+sensor:
+  - name: !input sensor_name
+    unit_of_measurement: "%"
+    state_class: measurement
+    icon: mdi:progress-wrench
+    state: >-
+      {% set p = [use_pct, age_pct] | select('number') | list %}
+      {{ ([p | max, 0] | max) | round(0) | int if p | count > 0 else none }}
+    attributes:
+      limited_by: >-
+        {{ 'unknown' if use_pct is none and age_pct is none
+           else ('age' if (age_pct or 0) > (use_pct or 0)
+           else ('runtime' if track_mode == 'runtime' else 'use')) }}
+      used: "{{ none if used is none else used | round(1) }}"
+      usage_unit: "{{ 'hours' if track_mode == 'runtime' else 'uses' }}"
+      usage_limit: "{{ limit | int }}"
+      usage_percent: "{{ use_pct }}"
+      days_since_replaced: "{{ age_days }}"
+      age_limit_days: "{{ age_cap | int(0) }}"
+      age_percent: "{{ age_pct }}"
+      replaced_on: "{{ states(replaced_helper) }}"
