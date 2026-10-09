@@ -96,6 +96,15 @@ What it cannot do out of the box, and what the three tools here add:
    description to fix. "Who's the starting quarterback?" is not a tool to
    write - it is the provider's web search option, if it has one.
 
+8. **A notification button's tap does not bring `action_data` back on
+   Android.** The `mobile_app_notification_action` event from a real tap on
+   the Android Companion app carries the action, the notification's `tag`,
+   `title`, `message` and channel - not the `action_data` you attached (the
+   iOS app does send it). Found with a real tap after every synthetic test
+   passed. The delivery automation matches a tap by the `tag` it set and
+   reads the title back from the notification itself, and keeps `action_data`
+   as the iOS path. Test buttons with a thumb, not with a fired event.
+
 ## Writing one of your own
 
 A read-only tool is short. This one answers "what's going on at home?" from
