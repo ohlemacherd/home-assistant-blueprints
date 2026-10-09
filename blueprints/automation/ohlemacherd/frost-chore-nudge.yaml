@@ -1,0 +1,252 @@
+blueprint:
+  name: Frost Tonight - an Outdoor Chore Before the Freeze
+  description: >
+    In the months you choose, once a day, reads the hourly forecast and, if
+    any hour in the next day and a half drops to freezing, nudges about the
+    outdoor chore that has to happen first: drain the hoses and shut the
+    outside taps, bring the pots in, cover the spigots, blow out the
+    sprinklers. If you give it a to-do list, the item is the memory: it is
+    added the first time frost shows up, the nudge repeats each frost day
+    while it is open, and once you tick it the blueprint is silent for the
+    rest of the season. Next season the ticked item is reopened and the
+    cycle starts again. Without a list it nudges on each day frost is in
+    the forecast.
+
+
+    Why a forecast and not a calendar date? The first frost moves by a month
+    from year to year. A reminder on October 15 is early one year and a
+    burst pipe the next. The forecast knows; the calendar guesses.
+
+
+    Needs a weather entity that provides an hourly forecast (Met.no, which
+    comes with Home Assistant, does) and a notify service. Optional: a to-do
+    list that supports due dates (Local To-do and Google Tasks do; the
+    Shopping List does not, and there the season memory is "you delete the
+    item") and the item's text.
+
+
+    Example: September to November, 17:30, weather.home, 34 degrees within
+    36 hours, item "Winterize outdoor water" on the household list.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/frost-chore-nudge.yaml
+  input:
+    weather_entity:
+      name: Weather entity
+      selector:
+        entity:
+          filter:
+            - domain: weather
+    threshold:
+      name: Frost threshold
+      description: In the weather entity's own unit - 34 for Fahrenheit (a margin above freezing), 1 for Celsius.
+      default: 34
+      selector:
+        number:
+          min: -10
+          max: 45
+          step: 1
+          mode: box
+    lookahead_hours:
+      name: Hours ahead to look
+      default: 36
+      selector:
+        number:
+          min: 6
+          max: 72
+          step: 6
+          unit_of_measurement: hours
+          mode: box
+    check_time:
+      name: Time of the daily check
+      description: Late afternoon leaves time to do the chore before dark.
+      default: "17:30:00"
+      selector:
+        time: {}
+    months:
+      name: Months to watch
+      default: ["9", "10", "11"]
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - label: January
+              value: "1"
+            - label: February
+              value: "2"
+            - label: March
+              value: "3"
+            - label: April
+              value: "4"
+            - label: May
+              value: "5"
+            - label: June
+              value: "6"
+            - label: July
+              value: "7"
+            - label: August
+              value: "8"
+            - label: September
+              value: "9"
+            - label: October
+              value: "10"
+            - label: November
+              value: "11"
+            - label: December
+              value: "12"
+    todo_list:
+      name: To-do list (optional)
+      description: >-
+        The item below is added here on the first frost forecast and is the
+        memory for the season. A list that supports due dates (Local To-do,
+        Google Tasks) lets the blueprint tell last season's ticked item from
+        this season's and reopen it.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: todo
+    todo_item:
+      name: To-do item
+      default: Winterize outdoor water
+      selector:
+        text: {}
+    season_days:
+      name: A ticked item older than this is last season's (days)
+      description: Judged by the item's due date, which this blueprint sets to the day it added or reopened the item.
+      default: 180
+      selector:
+        number:
+          min: 60
+          max: 330
+          step: 10
+          unit_of_measurement: days
+          mode: box
+    notify_service:
+      name: Notify service
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    title:
+      name: Push title
+      default: Frost in the forecast
+      selector:
+        text: {}
+
+mode: single
+max_exceeded: silent
+
+variables:
+  weather_entity: !input weather_entity
+  threshold: !input threshold
+  lookahead_hours: !input lookahead_hours
+  months: !input months
+  todo_list: !input todo_list
+  todo_item: !input todo_item
+  season_days: !input season_days
+  notify_service: !input notify_service
+
+triggers:
+  - trigger: time
+    at: !input check_time
+
+conditions:
+  # The select stores months as strings.
+  - condition: template
+    value_template: "{{ (now().month | string) in (months | map('string') | list) }}"
+
+actions:
+  - action: weather.get_forecasts
+    continue_on_error: true
+    target:
+      entity_id: "{{ weather_entity }}"
+    data:
+      type: hourly
+    response_variable: fc
+  - variables:
+      hours: "{{ (fc[weather_entity].forecast if (fc is defined and weather_entity in fc) else [])[:(lookahead_hours | int)] }}"
+      temps: "{{ hours | map(attribute='temperature') | reject('none') | list }}"
+      coldest: "{{ (temps | min) if temps | count > 0 else none }}"
+      coldest_at: >-
+        {% set ns = namespace(t='') %}
+        {% for h in hours %}
+          {% if coldest is not none and h.temperature is defined and h.temperature == coldest and ns.t == '' %}
+            {% set ns.t = (h.datetime | as_datetime | as_local).strftime('%A %H:%M') if h.datetime is defined else '' %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.t }}
+  # Fails silent on a missing forecast: tomorrow's check tries again.
+  - condition: template
+    value_template: "{{ coldest is not none and (coldest | float) <= (threshold | float) }}"
+  - choose:
+      # With a list: the item is the memory.
+      - conditions:
+          - condition: template
+            value_template: "{{ todo_list != '' and (todo_item | trim) != '' }}"
+        sequence:
+          - action: todo.get_items
+            continue_on_error: true
+            target:
+              entity_id: "{{ todo_list }}"
+            response_variable: items
+          - variables:
+              # SET_DUE_DATE_ON_ITEM is bit 16 of the list's supported_features.
+              due_ok: "{{ ((state_attr(todo_list, 'supported_features') | int(0)) | bitwise_and(16)) > 0 }}"
+              found: >-
+                {% set want = todo_item | trim | lower %}
+                {% set ns = namespace(it=none) %}
+                {% for it in ((items[todo_list]['items'] if (items is defined and todo_list in items) else [])) %}
+                  {% if (it.summary | default('', true) | string | trim | lower) == want %}
+                    {# prefer an open copy over a completed one #}
+                    {% if ns.it is none or (it.status | default('needs_action')) == 'needs_action' %}{% set ns.it = it %}{% endif %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.it if ns.it is not none else {} }}
+              item_status: "{{ found.status | default('missing') if found else 'missing' }}"
+              # A completed item whose due date is older than a season is
+              # last year's. Without a due date it cannot be dated, so it
+              # stays done until you delete it.
+              last_season: >-
+                {% set d = (found.due | default('', true) | string) if found else '' %}
+                {% set ddt = d | as_datetime if d != '' else none %}
+                {{ item_status == 'completed' and ddt is not none
+                   and (now().date() - (ddt | as_local).date()).days > (season_days | int) }}
+          # Ticked this season: nothing more to say.
+          - condition: template
+            value_template: "{{ item_status != 'completed' or last_season }}"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ item_status == 'missing' }}"
+                sequence:
+                  - action: todo.add_item
+                    continue_on_error: true
+                    target:
+                      entity_id: "{{ todo_list }}"
+                    data: >-
+                      {{ {'item': (todo_item | trim), 'due_date': (now().date() | string)} if due_ok else {'item': (todo_item | trim)} }}
+              - conditions:
+                  - condition: template
+                    value_template: "{{ last_season }}"
+                sequence:
+                  - action: todo.update_item
+                    continue_on_error: true
+                    target:
+                      entity_id: "{{ todo_list }}"
+                    data: >-
+                      {{ {'item': found.uid, 'status': 'needs_action', 'due_date': (now().date() | string)} if due_ok else {'item': found.uid, 'status': 'needs_action'} }}
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: !input title
+              message: >-
+                Forecast low {{ coldest }} ({{ coldest_at }}). "{{ todo_item | trim }}" is on the list - tick it when it is done and this goes quiet for the season.
+    # Without a list: a nudge on each day frost is in the forecast.
+    default:
+      - action: "{{ notify_service }}"
+        continue_on_error: true
+        data:
+          title: !input title
+          message: "Forecast low {{ coldest }} ({{ coldest_at }}). Hoses, taps, pots, sprinklers."

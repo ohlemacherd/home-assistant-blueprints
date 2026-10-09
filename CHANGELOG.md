@@ -1,5 +1,25 @@
 # Changelog
 
+## 2026-10-09
+
+- **AI Daily Briefing (behaviour fix):** the day an event is on is now the LOCAL date it starts, not the first ten characters of the string the calendar sent, so a feed that reports in UTC no longer puts an evening event on tomorrow. An all-day event is listed on every day it covers ("day 2 of 4") instead of vanishing after its first morning. A timed event that has already ended is dropped from today's list and one that is under way is labelled, so an evening run never reads this morning's appointment as upcoming. To-do due dates are read the same way, and an overdue item says so. If your briefings looked right before, they will read the same; if a multi-day trip or an evening run ever read wrong, this is why.
+- Fourteen new blueprints and two docs. Nothing else already published changed behaviour.
+  - **Cold-Morning Prompt Before Your Alarm** (automation): 20-40 minutes before the phone's alarm, below a temperature, one push with a button that runs a script you choose. It offers; a person taps; nothing starts on its own.
+  - **Integration Reload Watchdog** (automation): enough of one integration's entities unavailable together → reload its config entry, then a push with a Restart button repeated every half hour while the outage lasts, then an optional automatic restart inside waking hours, capped per outage.
+  - **Cold Snap Tire Pressure Estimate** (automation): an estimate from outdoor temperature against the fill-day temperature, once per N days in the cold months, with the limits stated in the message.
+  - **Weekly Silent-Failure Digest** (automation): automations OFF minus an allow-list, battery devices gone unavailable, unavailable entities by domain, a stale automatic backup; silent when healthy.
+  - **Trash Night Reminder (holiday-shift aware)** (automation): the night before pickup, shifted a day when a named holiday falls on or before pickup day that week; optional shift-week Toggle.
+  - **Frost Tonight - an Outdoor Chore Before the Freeze** (automation): daily hourly-forecast read in chosen months; a to-do item is the season's memory, reopened the next season.
+  - **Night Brightness Cap** (automation): corrects an automation-commanded turn-on above a cap during a night window, in steps; by default never a hand on the switch (nor a clock-started routine, which carries no parent).
+  - **Room Temperature Safety Alert** (automation): floor and ceiling with a hold, never gated, a persistent record that clears itself, and an hourly check that alerts when the sensor has been unavailable or silent for hours.
+  - **Manual Change Hold** (automation): when a person adjusts a device by hand, a Toggle your automations respect turns on; released on the next off-to-on, at a time of day, or after N hours. Tells a hand from an automation by the change's context, with a writer list for integrations that drop it.
+  - **Voice Assistant Tool - Set a Reminder** (script) and **Voice Assistant Reminder Delivery** (automation): "remind me at 7:30" and "set a timer for 10 minutes" for an LLM voice assistant. The tool writes to a Local Calendar and returns at once; the delivery pushes with Snooze and Done buttons, and waits short reminders out in memory because the calendar trigger refreshes every 15 minutes.
+  - **Voice Assistant Tool - Weather Forecast** (script): the daily or hourly forecast with units, for an assistant whose built-in weather answer is current-conditions only.
+  - **Voice Assistant Tool - Open an App on the TV** (script): opens a listed app on an Android TV Remote device, or a YouTube search.
+  - **Camera Check on a Schedule** (automation): runs an AI Camera Yes/No Check at a time or at sunrise/sunset on chosen weekdays, pushes on the answer you name, ticks a to-do item on the other, stays silent when the camera couldn't see.
+  - `docs/voice-assistant-tools.md`: a script exposed to Assist is a tool; what the model already has; seven rules; a short example. `docs/camera-recipes.md`: five camera checks with the questions that worked.
+- README: the contents table is one ranking of 26, ordered from the most unusual to the most basic; the requirements table has a row per new blueprint; a glossary line for Assist; the briefing's Calendars row states the day rules.
+
 ## 2026-09-25
 
 - AI Daily Briefing: the default **Who this is for** line is now generic ("the people in this household, reading it on a shared screen or their phones"). If you never changed that input, the prompt wording changes on your next run; set the input to keep the old line.

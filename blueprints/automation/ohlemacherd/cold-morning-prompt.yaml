@@ -1,0 +1,289 @@
+blueprint:
+  name: Cold-Morning Prompt Before Your Alarm (one tap, nothing fires itself)
+  description: >
+    On a workday morning, 20 to 40 minutes before the alarm on your phone
+    goes off, if it is below freezing outside, one push with a button:
+    "22° out - warm up the car?" A tap runs a script you choose - a remote
+    start, a heated driveway, the bathroom radiator, the coffee maker. The
+    phone's alarm is the clock, so a 5:30 alarm and an 8:00 alarm each get
+    the prompt at the right time, and a day with no alarm gets nothing
+    (unless you set a fallback time for alarm-less days).
+
+
+    Why a button and not an automation that just does it? Because the
+    expensive thing (ten minutes of engine, a kilowatt of heater) should be
+    a human decision on a day the human might be working from home, and a
+    prompt that appears only when it is cold and only before the alarm is
+    cheap to ignore. The rule is: it offers, a person taps, nothing starts
+    on its own.
+
+
+    Needs: the Companion app's "Next alarm" sensor (Android; it is off until
+    you enable it under the app's Settings -> Companion app -> Manage
+    sensors, where you can also limit it to your clock app), an outdoor
+    temperature sensor, a script to run, and the Companion app notify
+    service for the button. Optional: an entity that must be in a state for
+    the prompt to make sense (the car parked at home, the garage door
+    closed).
+
+
+    Example: next alarm on sensor.phone_next_alarm, outdoor temperature
+    below 30, weekdays, car tracker at home, button "Remote-start" runs
+    script.car_remote_start. One prompt per morning.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/cold-morning-prompt.yaml
+  input:
+    alarm_sensor:
+      name: Next-alarm sensor
+      description: >-
+        The Companion app's "Next alarm" sensor for the phone whose alarm
+        counts (Android). It is off by default: enable it under the app's
+        Settings -> Companion app -> Manage sensors. Its state is the next
+        alarm's date-time.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+    lead_min:
+      name: Earliest before the alarm (minutes)
+      default: 20
+      selector:
+        number:
+          min: 5
+          max: 180
+          step: 5
+          unit_of_measurement: minutes
+          mode: box
+    lead_max:
+      name: Latest before the alarm (minutes)
+      description: The prompt fires once while the alarm is between these two distances away.
+      default: 40
+      selector:
+        number:
+          min: 10
+          max: 240
+          step: 5
+          unit_of_measurement: minutes
+          mode: box
+    use_fallback:
+      name: Also prompt at a fallback time on days with no alarm
+      description: Only when the sensor shows no alarm today. A day with an alarm uses the alarm.
+      default: false
+      selector:
+        boolean: {}
+    fallback_time:
+      name: Fallback time
+      default: "06:45:00"
+      selector:
+        time: {}
+    weekdays:
+      name: Weekdays
+      default: [mon, tue, wed, thu, fri]
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - label: Monday
+              value: mon
+            - label: Tuesday
+              value: tue
+            - label: Wednesday
+              value: wed
+            - label: Thursday
+              value: thu
+            - label: Friday
+              value: fri
+            - label: Saturday
+              value: sat
+            - label: Sunday
+              value: sun
+    outdoor_temp:
+      name: Outdoor temperature sensor
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    below:
+      name: Prompt when the outdoor temperature is below
+      description: In the sensor's own unit - 30 for Fahrenheit, -1 for Celsius.
+      default: 30
+      selector:
+        number:
+          min: -40
+          max: 70
+          step: 1
+          mode: box
+    freshness_minutes:
+      name: Ignore a reading not reported for (minutes)
+      description: >-
+        A sensor that stopped reporting should not prompt from yesterday's
+        number. Measured from the last time the sensor REPORTED, even if the
+        value did not change. Weather-service sensors report hourly; give
+        them 90.
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 1440
+          step: 5
+          unit_of_measurement: minutes
+          mode: box
+    gate_entity:
+      name: Only when this entity... (optional)
+      description: >-
+        The car's tracker (state home), the garage door (closed), a "working
+        from home" Toggle (off). Leave empty for no gate.
+      default: ""
+      selector:
+        entity: {}
+    gate_state:
+      name: ...is in this state
+      default: home
+      selector:
+        text: {}
+    action_script:
+      name: Script the button runs
+      description: What a tap starts - a remote start, a heater, the coffee. Nothing runs without the tap.
+      selector:
+        entity:
+          filter:
+            - domain: script
+    button_label:
+      name: Button label
+      default: Warm it up
+      selector:
+        text: {}
+    notify_service:
+      name: Notify service (Companion app)
+      description: The button needs the Companion app (notify.mobile_app_<your phone>). Any other notify service gets the text only.
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    companion_app:
+      name: Is the notify service the Companion app?
+      default: true
+      selector:
+        boolean: {}
+    throttle_hours:
+      name: At most one prompt every (hours)
+      description: One per morning by default; the window is checked every five minutes.
+      default: 6
+      selector:
+        number:
+          min: 1
+          max: 24
+          step: 1
+          unit_of_measurement: hours
+          mode: box
+
+mode: parallel
+max: 3
+max_exceeded: silent
+
+variables:
+  alarm_sensor: !input alarm_sensor
+  lead_min: !input lead_min
+  lead_max: !input lead_max
+  use_fallback: !input use_fallback
+  fallback_time: !input fallback_time
+  outdoor_temp: !input outdoor_temp
+  below: !input below
+  freshness_minutes: !input freshness_minutes
+  gate_entity: !input gate_entity
+  gate_state: !input gate_state
+  action_script: !input action_script
+  button_label: !input button_label
+  notify_service: !input notify_service
+  companion_app: !input companion_app
+  throttle_hours: !input throttle_hours
+
+triggers:
+  - trigger: time_pattern
+    minutes: "/5"
+    id: tick
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: COLD_MORNING_GO
+    id: tap
+
+# Every test lives here, at the top, on purpose. An automation's
+# last_triggered is stamped on every run that gets past these conditions,
+# so a throttle that reads last_triggered only works when the tests that
+# decide "prompt or not" are up here and not inside the actions.
+conditions:
+  - condition: or
+    conditions:
+      # A tap on this prompt's own button.
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: tap
+          - condition: template
+            value_template: "{{ (trigger.event.data.action_data | default({})).get('script', '') == action_script }}"
+      # A five-minute tick that should prompt.
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: tick
+          - condition: time
+            weekday: !input weekdays
+          # The alarm is lead_min..lead_max minutes away; or there is no
+          # alarm today and it is the fallback window (five minutes wide,
+          # like the tick).
+          - condition: template
+            value_template: >-
+              {% set a = states(alarm_sensor) %}
+              {% set adt = (a | as_datetime) if a not in ['unknown', 'unavailable', 'none', ''] else none %}
+              {% set in_alarm_window = adt is not none
+                 and (lead_min | int) * 60 <= (adt - now()).total_seconds() <= (lead_max | int) * 60 %}
+              {% set no_alarm_today = adt is none or (adt | as_local).date() != now().date() %}
+              {% set f = today_at(fallback_time) %}
+              {% set in_fallback = use_fallback and no_alarm_today and f <= now() < f + timedelta(minutes=5) %}
+              {{ in_alarm_window or in_fallback }}
+          - condition: template
+            value_template: >-
+              {% set t = states(outdoor_temp) | float(none) %}
+              {{ t is not none and t < (below | float) }}
+          # last_reported, not last_updated: a reading that holds the same
+          # value for an hour is still fresh if the sensor kept reporting it.
+          - condition: template
+            value_template: >-
+              {% set s = states[outdoor_temp] %}
+              {{ s is not none and (now() - s.last_reported).total_seconds() < (freshness_minutes | int) * 60 }}
+          - condition: template
+            value_template: "{{ gate_entity == '' or is_state(gate_entity, gate_state | string) }}"
+          - condition: template
+            value_template: >-
+              {{ this.attributes.last_triggered is none
+                 or (now() - this.attributes.last_triggered).total_seconds() > (throttle_hours | int) * 3600 }}
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: tick
+        sequence:
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: "{{ states(outdoor_temp) | float(0) | round(0) | int }}° out - {{ button_label | lower }}?"
+              message: "Tap to run it. Nothing starts on its own."
+              data: >-
+                {%- if companion_app -%}
+                  {{ {'tag': 'cold_morning_' ~ (action_script | slugify),
+                      'actions': [{'action': 'COLD_MORNING_GO', 'title': button_label}],
+                      'action_data': {'script': action_script}} }}
+                {%- else -%}{{ {} }}{%- endif -%}
+      - conditions:
+          - condition: trigger
+            id: tap
+        sequence:
+          # Fire-and-forget: the script's own run is its own business.
+          - action: script.turn_on
+            target:
+              entity_id: "{{ action_script }}"

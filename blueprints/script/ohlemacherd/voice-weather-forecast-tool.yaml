@@ -1,0 +1,134 @@
+blueprint:
+  name: Voice Assistant Tool - Weather Forecast
+  description: >
+    Gives an AI voice assistant the forecast. Out of the box the assistant
+    can answer "what's the weather" with the current conditions - Home
+    Assistant's built-in weather intent is current-only - so "will it rain
+    tomorrow afternoon" and "what's Saturday look like" come back as a
+    shrug. This script calls weather.get_forecasts on the weather entity you
+    pick and returns the daily forecast for the next few days, or the hourly
+    one for the next 24 hours, as plain numbers with their units, so the
+    model can reason over them. It returns at once.
+
+
+    A script exposed to Assist IS a tool: the model reads the description
+    and the fields, calls it, and reads what comes back. Needs a weather
+    entity (Met.no comes with Home Assistant) and the script exposed to
+    Assist (Settings -> Voice assistants -> Expose).
+
+
+    ONE STEP THAT MATTERS. When you save the script, the save dialog asks
+    for a name and a description. What you type in Description is what the
+    model reads; the blueprint's own text does not reach it, and an empty
+    box tells the model nothing. Click "Add description" and paste: "Get the
+    weather forecast for the home: daily for the next days (high, low,
+    condition, chance and amount of precipitation, wind), or hourly for the
+    next 24 hours. Use for any question about weather later today, tonight,
+    tomorrow, the weekend or a named day, and for 'should I bring an
+    umbrella', 'will it rain', 'how cold tonight'. Units are included."
+  domain: script
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/script/ohlemacherd/voice-weather-forecast-tool.yaml
+  input:
+    weather_entity:
+      name: Weather entity
+      selector:
+        entity:
+          filter:
+            - domain: weather
+    max_days:
+      name: Most days the daily forecast may return
+      description: >-
+        A cap on what the assistant can ask for. The daily list starts
+        today, so reaching the weekend from a Monday needs 7. Most weather
+        integrations provide 5 to 10 days.
+      default: 7
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 1
+          unit_of_measurement: days
+          mode: box
+
+mode: parallel
+max: 4
+# Reaches the model only for a script written in YAML; a script saved in the
+# UI carries its own description, which replaces this one (see the blueprint
+# description). The field descriptions below always reach the model.
+description: >-
+  Get the weather forecast for the home: daily for the next days (high, low,
+  condition, chance and amount of precipitation, wind), or hourly for the
+  next 24 hours. Use for any question about weather later today, tonight,
+  tomorrow, the weekend or a named day. Units are included.
+fields:
+  days:
+    name: Days
+    description: >-
+      How many days ahead for the daily forecast, counting today as day 1
+      (up to the cap set in the blueprint, 7 by default). Default 3; ask for
+      7 to reach the weekend.
+    example: 3
+    selector:
+      number:
+        min: 1
+        max: 7
+        mode: box
+  hourly:
+    name: Hourly
+    description: True for an hour-by-hour forecast for the next 24 hours instead of daily.
+    example: false
+    selector:
+      boolean: {}
+
+variables:
+  weather_entity: !input weather_entity
+  max_days: !input max_days
+
+sequence:
+  - variables:
+      want_hourly: "{{ hourly | default(false) | bool(false) }}"
+      n: "{{ [[(days | default(3) | int(3)), 1] | max, (max_days | int(5))] | min }}"
+  - action: weather.get_forecasts
+    continue_on_error: true
+    target:
+      entity_id: "{{ weather_entity }}"
+    data:
+      type: "{{ 'hourly' if want_hourly else 'daily' }}"
+    response_variable: fc
+  - variables:
+      rows: >-
+        {% set f = (fc[weather_entity].forecast if (fc is defined and weather_entity in fc) else []) %}
+        {% set f = f[:24] if want_hourly else f[:n] %}
+        {% set ns = namespace(r=[]) %}
+        {% for d in f %}
+          {% set ns.r = ns.r + [{
+               'time': ((d.datetime | as_datetime | as_local).strftime('%a %Y-%m-%d %H:%M') if d.datetime is defined and d.datetime else ''),
+               'condition': d.condition | default(''),
+               'temperature': d.temperature | default(none),
+               'temperature_low': d.templow | default(none),
+               'precipitation_probability_pct': d.precipitation_probability | default(none),
+               'precipitation': d.precipitation | default(none),
+               'wind_speed': d.wind_speed | default(none),
+               'humidity_pct': d.humidity | default(none)}] %}
+        {% endfor %}
+        {{ ns.r }}
+  - variables:
+      result:
+        weather_entity: "{{ state_attr(weather_entity, 'friendly_name') or weather_entity }}"
+        now: "{{ now().strftime('%A %Y-%m-%d %H:%M') }}"
+        current:
+          condition: "{{ states(weather_entity) }}"
+          temperature: "{{ state_attr(weather_entity, 'temperature') }}"
+          humidity_pct: "{{ state_attr(weather_entity, 'humidity') }}"
+          wind_speed: "{{ state_attr(weather_entity, 'wind_speed') }}"
+        units:
+          temperature: "{{ state_attr(weather_entity, 'temperature_unit') }}"
+          wind_speed: "{{ state_attr(weather_entity, 'wind_speed_unit') }}"
+          precipitation: "{{ state_attr(weather_entity, 'precipitation_unit') }}"
+        forecast_type: "{{ 'hourly, next 24 hours' if want_hourly else ('daily, next ' ~ n ~ ' days') }}"
+        forecast: "{{ rows }}"
+        note: "{{ 'The weather entity returned no forecast; say so rather than guess.' if (rows | count) == 0 else '' }}"
+  - stop: Forecast read
+    response_variable: result
