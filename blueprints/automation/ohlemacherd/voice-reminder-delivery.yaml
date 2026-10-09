@@ -1,0 +1,195 @@
+blueprint:
+  name: Voice Assistant Reminder Delivery (with Snooze and Done)
+  description: >
+    The other half of "Voice Assistant Tool - Set a Reminder". Watches the
+    reminders calendar and pushes each reminder when its event starts, with
+    a Snooze button and a Done button. Snooze writes the reminder back to
+    the calendar for later (or waits in memory when the snooze is short);
+    Done writes one logbook line. It also takes the short reminders the
+    tool hands over as events and waits them out in memory. No store, no
+    timer helpers: the calendar is the memory, and it survives restarts.
+
+
+    The buttons need the Companion app (notify.mobile_app_...). Any other
+    notify service gets the text and no buttons. A reminder someone puts on
+    the calendar by hand - from a dashboard, or from a phone's calendar app
+    if the calendar is synced - is delivered the same way, which is a
+    feature.
+
+
+    Needs: the same calendar the tool writes to, a notify service, and the
+    tool blueprint imported. Keep the "hold in memory when due within"
+    number the same in both.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/voice-reminder-delivery.yaml
+  input:
+    calendar:
+      name: Reminders calendar
+      description: The calendar the tool writes to.
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+    notify_service:
+      name: Notify service
+      description: >-
+        notify.mobile_app_<your phone> for buttons, or a notify group that
+        reaches several phones. The default is built in and shows under
+        Settings -> Notifications, with no buttons.
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    companion_app:
+      name: Is the notify service the Companion app?
+      description: >-
+        On (default): the push carries the Snooze and Done buttons, a tag so
+        a snoozed reminder replaces the earlier one, and the channel below.
+        Turn it off for a notify service that might reject fields it does
+        not know.
+      default: true
+      selector:
+        boolean: {}
+    snooze_minutes:
+      name: Snooze length (minutes)
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 1440
+          step: 5
+          unit_of_measurement: minutes
+          mode: box
+    short_minutes:
+      name: Hold in memory when due within (minutes)
+      description: >-
+        The same number as in the tool. A snooze shorter than this is waited
+        out in memory instead of being written to the calendar, whose
+        trigger would miss it.
+      default: 20
+      selector:
+        number:
+          min: 16
+          max: 120
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    channel:
+      name: Notification channel (Android)
+      description: The Companion app channel these pushes use, so the phone can give reminders their own sound.
+      default: Reminders
+      selector:
+        text: {}
+    title_prefix:
+      name: Title prefix
+      default: "Reminder: "
+      selector:
+        text: {}
+
+# parallel: two reminders can be due at once, and a short one waits here
+# for up to the threshold while others come and go.
+mode: parallel
+max: 20
+max_exceeded: silent
+
+variables:
+  calendar: !input calendar
+  notify_service: !input notify_service
+  companion_app: !input companion_app
+  snooze_minutes: !input snooze_minutes
+  short_minutes: !input short_minutes
+  channel: !input channel
+  title_prefix: !input title_prefix
+
+triggers:
+  - trigger: calendar
+    entity_id: !input calendar
+    event: start
+    id: calendar
+  - trigger: event
+    event_type: voice_reminder_due_soon
+    id: soon
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: VOICE_REMINDER_SNOOZE
+    id: snooze
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: VOICE_REMINDER_DONE
+    id: done
+
+conditions:
+  # A "due soon" event and a button tap both name their calendar, so two
+  # instances of this blueprint (two calendars, two phones) never both act.
+  - condition: template
+    value_template: >-
+      {% if trigger.id == 'soon' %}
+        {{ (trigger.event.data.calendar | default('')) == calendar }}
+      {% elif trigger.id in ['snooze', 'done'] %}
+        {{ (trigger.event.data.action_data | default({})).get('calendar', calendar) == calendar }}
+      {% else %}
+        true
+      {% endif %}
+
+actions:
+  - variables:
+      ad: "{{ trigger.event.data.action_data | default({}) if trigger.id in ['snooze', 'done'] else {} }}"
+      r_title: >-
+        {%- if trigger.id == 'calendar' -%}{{ trigger.calendar_event.summary | default('Reminder', true) }}
+        {%- elif trigger.id == 'soon' -%}{{ trigger.event.data.title | default('Reminder', true) }}
+        {%- else -%}{{ ad.get('title', 'Reminder') }}{%- endif -%}
+      r_message: >-
+        {%- if trigger.id == 'calendar' -%}{{ trigger.calendar_event.description | default('', true) }}
+        {%- elif trigger.id == 'soon' -%}{{ trigger.event.data.message | default('', true) }}
+        {%- else -%}{{ ad.get('message', '') }}{%- endif -%}
+      r_due: >-
+        {%- if trigger.id == 'soon' -%}{{ trigger.event.data.due }}
+        {%- elif trigger.id == 'snooze' -%}{{ (now() + timedelta(minutes=(snooze_minutes | int(60)))).isoformat() }}
+        {%- else -%}{{ now().isoformat() }}{%- endif -%}
+      secs: "{{ [((as_timestamp(r_due, 0) - as_timestamp(now())) | int), 0] | max }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'done' }}"
+        sequence:
+          - action: logbook.log
+            data:
+              name: Reminder
+              message: "'{{ r_title }}' marked done from the notification."
+      # A snooze long enough for the calendar trigger to see it goes back
+      # on the calendar. The calendar trigger delivers it from there.
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'snooze' and secs >= (short_minutes | int(20)) * 60 }}"
+        sequence:
+          - action: calendar.create_event
+            target:
+              entity_id: "{{ calendar }}"
+            data:
+              summary: "{{ r_title }}"
+              description: "{{ r_message }}"
+              start_date_time: "{{ r_due }}"
+              end_date_time: "{{ (as_datetime(r_due) + timedelta(minutes=15)).isoformat() }}"
+    # A calendar start pushes now (secs is 0). A "due soon" hand-off or a
+    # short snooze waits here first.
+    default:
+      - delay:
+          seconds: "{{ secs }}"
+      - action: "{{ notify_service }}"
+        continue_on_error: true
+        data:
+          title: "{{ title_prefix }}{{ r_title }}"
+          message: "{{ r_message if r_message else 'It is time.' }}"
+          data: >-
+            {%- if companion_app -%}
+              {{ {'tag': 'voice_reminder_' ~ (r_title | slugify),
+                  'channel': channel,
+                  'actions': [{'action': 'VOICE_REMINDER_SNOOZE', 'title': 'Snooze ' ~ snooze_minutes ~ ' min'},
+                              {'action': 'VOICE_REMINDER_DONE', 'title': 'Done'}],
+                  'action_data': {'title': r_title, 'message': r_message, 'calendar': calendar}} }}
+            {%- else -%}
+              {{ {} }}
+            {%- endif -%}

@@ -1,0 +1,210 @@
+blueprint:
+  name: Weekly Silent-Failure Digest (what the per-event alerts can't see)
+  description: >
+    Once a week, one message listing the failures nothing else reports: the
+    automations that are switched OFF (minus the ones you turned off on
+    purpose), battery devices that died by going unavailable (a low-battery
+    sensor only catches a device that reports a low number, never one that
+    stops reporting), entities in the domains you care about - climate,
+    vacuum, lock, camera - that are unavailable, and an automatic backup
+    older than it should be. Silence when everything is healthy, or a
+    one-line all-clear if you prefer. Every line is a thing that would
+    otherwise be discovered weeks later, by accident.
+
+
+    Why weekly and why one message? A dead thermostat puck is not urgent on
+    the day; a month of it is. One Sunday-morning message is read; seven
+    daily ones are muted. And the allow-list is the point: a disabled
+    automation is a decision when it is on the list and a silent failure
+    when it is not, so keep the list honest.
+
+
+    Needs only a notify service. Optional: the automations you have disabled
+    on purpose, entities that are unavailable by design (a seasonal device,
+    a spare), and the backup sensor Home Assistant provides
+    (sensor.backup_last_successful_automatic_backup).
+
+
+    Example: Sunday 09:05, domains climate + vacuum + lock + camera, battery
+    deaths on, backup older than 8 days flagged.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/weekly-silent-failure-digest.yaml
+  input:
+    weekday:
+      name: Day
+      default: sun
+      selector:
+        select:
+          mode: list
+          options:
+            - label: Monday
+              value: mon
+            - label: Tuesday
+              value: tue
+            - label: Wednesday
+              value: wed
+            - label: Thursday
+              value: thu
+            - label: Friday
+              value: fri
+            - label: Saturday
+              value: sat
+            - label: Sunday
+              value: sun
+    at_time:
+      name: Time
+      default: "09:05:00"
+      selector:
+        time: {}
+    allow_off:
+      name: Automations that are off on purpose
+      description: These are not reported when off. Keep it in step with what you disable deliberately.
+      default: []
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: automation
+    check_batteries:
+      name: Report battery devices that have gone unavailable
+      default: true
+      selector:
+        boolean: {}
+    domains:
+      name: Domains whose unavailable entities are reported
+      default: [climate, vacuum, lock, camera]
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - climate
+            - vacuum
+            - lock
+            - camera
+            - alarm_control_panel
+            - cover
+            - fan
+            - humidifier
+            - water_heater
+            - media_player
+            - light
+            - switch
+    expected_unavailable:
+      name: Entities that are unavailable by design
+      description: A seasonal device, a spare, a battery camera that sleeps. Never reported.
+      default: []
+      selector:
+        entity:
+          multiple: true
+    backup_sensor:
+      name: Last-backup sensor (optional)
+      description: >-
+        Home Assistant's own sensor.backup_last_successful_automatic_backup.
+        Its state is a timestamp, and it stays unknown until automatic
+        backups are set up under Settings -> System -> Backups - which this
+        digest then reports as "no successful automatic backup recorded".
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+    backup_max_days:
+      name: Backup older than this is reported (days)
+      default: 8
+      selector:
+        number:
+          min: 1
+          max: 90
+          step: 1
+          unit_of_measurement: days
+          mode: box
+    notify_service:
+      name: Notify service
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    all_clear:
+      name: Send a one-line all-clear when nothing is wrong
+      default: false
+      selector:
+        boolean: {}
+
+mode: single
+max_exceeded: silent
+
+variables:
+  allow_off: !input allow_off
+  check_batteries: !input check_batteries
+  domains: !input domains
+  expected_unavailable: !input expected_unavailable
+  backup_sensor: !input backup_sensor
+  backup_max_days: !input backup_max_days
+  notify_service: !input notify_service
+  all_clear: !input all_clear
+
+triggers:
+  - trigger: time
+    at: !input at_time
+
+conditions:
+  - condition: time
+    weekday: !input weekday
+
+actions:
+  - variables:
+      off_autos: >-
+        {{ states.automation | selectattr('state', 'eq', 'off')
+           | rejectattr('entity_id', 'in', allow_off)
+           | map(attribute='name') | list }}
+      dead_batts: >-
+        {{ (states.sensor | selectattr('attributes.device_class', 'defined')
+            | selectattr('attributes.device_class', 'eq', 'battery')
+            | selectattr('state', 'in', ['unavailable', 'unknown'])
+            | rejectattr('entity_id', 'in', expected_unavailable)
+            | map(attribute='name') | list) if check_batteries else [] }}
+      dead_by_domain: >-
+        {% set ns = namespace(rows=[]) %}
+        {% for d in domains %}
+          {% set names = states[d] | default([]) | selectattr('state', 'in', ['unavailable', 'unknown'])
+                         | rejectattr('entity_id', 'in', expected_unavailable) | map(attribute='name') | list %}
+          {% if names | count > 0 %}{% set ns.rows = ns.rows + [d ~ ' unavailable (' ~ (names | count) ~ '): ' ~ (names | join(', '))] %}{% endif %}
+        {% endfor %}
+        {{ ns.rows }}
+      backup_line: >-
+        {% if backup_sensor != '' %}
+          {% set ts = states(backup_sensor) | as_datetime %}
+          {% if ts is none %}
+            {{ 'Backup: no successful automatic backup recorded (' ~ states(backup_sensor) ~ ')' }}
+          {% elif (now() - (ts | as_local)).days >= (backup_max_days | int) %}
+            {{ 'Backup: last successful automatic backup ' ~ (now() - (ts | as_local)).days ~ ' days ago' }}
+          {% endif %}
+        {% endif %}
+      parts: >-
+        {% set ns = namespace(p=[]) %}
+        {% if off_autos | count > 0 %}{% set ns.p = ns.p + ['Automations OFF (' ~ (off_autos | count) ~ '): ' ~ (off_autos | join(', '))] %}{% endif %}
+        {% if dead_batts | count > 0 %}{% set ns.p = ns.p + ['Battery devices gone silent (' ~ (dead_batts | count) ~ '): ' ~ (dead_batts | join(', '))] %}{% endif %}
+        {% set ns.p = ns.p + dead_by_domain %}
+        {% if (backup_line | trim) != '' %}{% set ns.p = ns.p + [backup_line | trim] %}{% endif %}
+        {{ ns.p }}
+  - if:
+      - condition: template
+        value_template: "{{ parts | count > 0 }}"
+    then:
+      - action: "{{ notify_service }}"
+        continue_on_error: true
+        data:
+          title: "Weekly system check: {{ parts | count }} thing{{ 's' if parts | count != 1 else '' }} to look at"
+          message: "{{ parts | join('\n') }}"
+    else:
+      - if:
+          - condition: template
+            value_template: "{{ all_clear }}"
+        then:
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: Weekly system check
+              message: Nothing silent has failed this week.

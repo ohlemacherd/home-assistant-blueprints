@@ -1,0 +1,330 @@
+blueprint:
+  name: Integration Reload Watchdog (reload, then ask, then restart with a cap)
+  description: >
+    Some integrations wedge. A local Wi-Fi integration loses a device, its
+    config entry hangs, and every light it owns goes unavailable until
+    someone restarts Home Assistant - which nobody does, because nobody
+    knows, until they walk into a dark kitchen 24 hours later. This watches
+    a list of entities that belong to one integration. When enough of them
+    have been unavailable for a few minutes it reloads the integration's
+    config entry, the gentle fix that clears the common case with nobody
+    involved. If they are still dead half a minute later, it sends one push
+    with a "Restart Home Assistant" button, and repeats it every half hour
+    while the outage lasts - an outage that sat unanswered for 14 hours is
+    how the repeat earned its place. And if you allow it, a wedge that has
+    lasted hours gets a restart without the tap, inside waking hours only,
+    at most N times per outage.
+
+
+    Why the cap, and why per outage? If two restarts have not cleared it,
+    the cause is not a wedge - devices are unplugged, off Wi-Fi, or on a
+    tripped breaker - and restarting every morning would thrash the house.
+    The counter resets only when the outage clears, so the cap is "N per
+    outage", never "N per day forever". The pushes keep coming, so it never
+    goes dark. Why waking hours? An unattended overnight restart that fails
+    oddly has nobody to notice it; a morning catch-up handles a wedge that
+    crossed the line in the night.
+
+
+    List the entities rather than naming the integration: an integration
+    whose config entry has failed or is stuck mid-unload has no live
+    entities for Home Assistant to look up by integration name, which is
+    exactly the state this watches for. Name the integration only as a
+    convenience for one whose entities stay registered while unavailable,
+    and know that battery sensors count toward the total.
+
+
+    Needs: the entities, a notify service - the Companion app for the
+    button - and, for the automatic restart, a Counter helper for the cap.
+    Auto-restart is off by default.
+
+
+    Example: the nine lights of a local Wi-Fi dimmer integration, at least 3
+    unavailable for 5 minutes, reload first; push with the button if that
+    fails and every 30 minutes after; auto-restart after 2 hours between
+    07:00 and 22:30, at most 2 per outage.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/integration-reload-watchdog.yaml
+  input:
+    entities:
+      name: Entities to watch
+      description: >-
+        The entities that go unavailable together when the integration
+        wedges - its lights, its switches. This is the reliable path: it
+        works even when the integration is so broken that none of its
+        entities is loaded.
+      default: []
+      selector:
+        entity:
+          multiple: true
+    integration:
+      name: Integration name (optional, with a limit)
+      description: >-
+        Adds every entity the integration currently provides - its internal
+        name (shelly, tplink, zha) or the title shown on its page under
+        Settings -> Devices & services. An entry that has failed to load
+        provides no entities to find this way, so the list above is the one
+        to rely on. Battery sensors count toward the total.
+      default: ""
+      selector:
+        text: {}
+    min_dead:
+      name: How many unavailable means the integration is down
+      description: >-
+        One device off Wi-Fi is that device's problem; this many at once is
+        the integration's. Counted across the list above and the
+        integration's entities together.
+      default: 3
+      selector:
+        number:
+          min: 1
+          max: 50
+          step: 1
+          mode: box
+    hold_minutes:
+      name: Unavailable for this long before acting
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    notify_service:
+      name: Notify service
+      description: >-
+        notify.mobile_app_<your phone> for the Restart button; the default is
+        built in and shows under Settings -> Notifications, without a button.
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    companion_app:
+      name: Is the notify service the Companion app?
+      description: On (default) adds the Restart button, high priority and a tag so each repeat replaces the last.
+      default: true
+      selector:
+        boolean: {}
+    auto_restart:
+      name: Restart Home Assistant by itself after a long wedge
+      description: >-
+        Off by default. On: a wedge that has lasted the hours below, inside
+        the window below, restarts Home Assistant with a 15-second warning
+        push, at most the cap per outage. Needs the Counter helper.
+      default: false
+      selector:
+        boolean: {}
+    restart_after_hours:
+      name: Hours of wedge before an automatic restart
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 24
+          step: 1
+          unit_of_measurement: hours
+          mode: box
+    window_start:
+      name: Automatic restarts allowed from
+      default: "07:00:00"
+      selector:
+        time: {}
+    window_end:
+      name: Automatic restarts allowed until
+      default: "22:30:00"
+      selector:
+        time: {}
+    restart_counter:
+      name: Restart counter (needed for automatic restarts)
+      description: >-
+        A Counter helper (Create helper -> Counter) that counts this
+        outage's automatic restarts; it is set back to 0 when the outage
+        clears. Without it, automatic restarts never happen.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: counter
+    max_restarts:
+      name: Most automatic restarts per outage
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 5
+          step: 1
+          mode: box
+
+# parallel: a tap on the Restart button must be handled while a watch run
+# is still inside its 30-second wait.
+mode: parallel
+max: 4
+max_exceeded: silent
+
+trigger_variables:
+  # Rendered once at load; the trigger templates below read them.
+  entities: !input entities
+  integration: !input integration
+  min_dead: !input min_dead
+
+variables:
+  entities: !input entities
+  integration: !input integration
+  min_dead: !input min_dead
+  hold_minutes: !input hold_minutes
+  notify_service: !input notify_service
+  companion_app: !input companion_app
+  auto_restart: !input auto_restart
+  restart_after_hours: !input restart_after_hours
+  restart_counter: !input restart_counter
+  max_restarts: !input max_restarts
+  # One id per instance, so a tap on this watchdog's button is not taken by
+  # another instance watching another integration.
+  watchdog_id: "{{ integration if integration != '' else (entities | first | default('watchdog')) }}"
+  watched: "{{ (entities + (integration_entities(integration) if integration != '' else [])) | unique | list }}"
+  dead: "{{ watched | select('is_state', 'unavailable') | list }}"
+  is_down: "{{ dead | count >= (min_dead | int) }}"
+  # Seconds the CURRENT outage has lasted: the newest change among the dead
+  # entities. A restart flaps every entity, which resets this.
+  down_for: >-
+    {{ (now().timestamp() - (expand(dead) | map(attribute='last_changed') | map('as_timestamp') | max)) if is_down else 0 }}
+
+triggers:
+  # The first edge of an outage. A template trigger fires once per
+  # false-to-true change and will not fire again while it stays true, nor
+  # after a restart that comes up already down - the half-hourly repeat
+  # below covers both.
+  - trigger: template
+    value_template: >-
+      {{ (entities + (integration_entities(integration) if integration != '' else []))
+         | unique | select('is_state', 'unavailable') | list | count >= (min_dead | int) }}
+    for:
+      minutes: !input hold_minutes
+    id: down
+  - trigger: time_pattern
+    minutes: "/30"
+    id: repeat
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: INTEGRATION_WATCHDOG_RESTART
+    id: tap
+  # The outage is over: the cap starts fresh for the next one.
+  - trigger: template
+    value_template: >-
+      {{ (entities + (integration_entities(integration) if integration != '' else []))
+         | unique | select('is_state', 'unavailable') | list | count < (min_dead | int) }}
+    id: cleared
+
+actions:
+  - choose:
+      # ---- the gentle fix, then the ask
+      - conditions:
+          - condition: trigger
+            id: down
+        sequence:
+          - action: homeassistant.reload_config_entry
+            continue_on_error: true
+            target:
+              entity_id: "{{ dead | first }}"
+          - delay:
+              seconds: 30
+          - condition: template
+            value_template: "{{ watched | select('is_state', 'unavailable') | list | count >= (min_dead | int) }}"
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: "{{ watchdog_id }}: {{ watched | select('is_state', 'unavailable') | list | count }} devices offline"
+              message: >-
+                Unavailable for {{ hold_minutes }}+ minutes and a reload of the
+                integration did not clear it. A restart of Home Assistant usually
+                does. If it doesn't, a device is unplugged or off the network.
+              data: >-
+                {%- if companion_app -%}
+                  {{ {'tag': 'integration_watchdog_' ~ (watchdog_id | slugify),
+                      'priority': 'high', 'ttl': 0,
+                      'actions': [{'action': 'INTEGRATION_WATCHDOG_RESTART', 'title': 'Restart Home Assistant'}],
+                      'action_data': {'watchdog': watchdog_id}} }}
+                {%- else -%}{{ {} }}{%- endif -%}
+      # ---- the button
+      - conditions:
+          - condition: trigger
+            id: tap
+          - condition: template
+            value_template: "{{ (trigger.event.data.action_data | default({})).get('watchdog', '') == watchdog_id }}"
+        sequence:
+          - action: homeassistant.restart
+      # ---- the automatic restart, capped per outage
+      - conditions:
+          - condition: trigger
+            id: repeat
+          - condition: template
+            value_template: "{{ auto_restart and restart_counter != '' and is_down }}"
+          - condition: time
+            after: !input window_start
+            before: !input window_end
+          - condition: template
+            value_template: "{{ (states(restart_counter) | int(99)) < (max_restarts | int) }}"
+          - condition: template
+            value_template: "{{ (down_for | float(0)) >= (restart_after_hours | int) * 3600 }}"
+        sequence:
+          # Counted and announced BEFORE the restart: nothing after
+          # homeassistant.restart is guaranteed to run.
+          - action: counter.increment
+            continue_on_error: true
+            target:
+              entity_id: "{{ restart_counter }}"
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: "Restarting Home Assistant: {{ watchdog_id }} wedged {{ restart_after_hours }}+ hours"
+              message: >-
+                Restart {{ states(restart_counter) | int(1) }} of {{ max_restarts }} for this outage.
+                Devices should return in a few minutes. Turn off automatic restarts
+                in this automation to go back to the button only.
+              data: >-
+                {%- if companion_app -%}
+                  {{ {'tag': 'integration_watchdog_' ~ (watchdog_id | slugify), 'priority': 'high', 'ttl': 0} }}
+                {%- else -%}{{ {} }}{%- endif -%}
+          - delay:
+              seconds: 15
+          - action: homeassistant.restart
+      # ---- the half-hourly repeat while the outage lasts (also the first
+      # push after a restart that came up still down). Not inside the first
+      # hold: the `down` branch owns that.
+      - conditions:
+          - condition: trigger
+            id: repeat
+          - condition: template
+            value_template: "{{ is_down and (down_for | float(0)) >= (hold_minutes | int) * 60 + 60 }}"
+        sequence:
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: "{{ watchdog_id }}: still {{ dead | count }} devices offline"
+              message: >-
+                Down for {{ ((down_for | float(0)) / 3600) | round(1) }} hours. A restart of Home
+                Assistant usually clears a wedged integration; if it doesn't, a device is unplugged
+                or off the network.
+              data: >-
+                {%- if companion_app -%}
+                  {{ {'tag': 'integration_watchdog_' ~ (watchdog_id | slugify),
+                      'priority': 'high', 'ttl': 0,
+                      'actions': [{'action': 'INTEGRATION_WATCHDOG_RESTART', 'title': 'Restart Home Assistant'}],
+                      'action_data': {'watchdog': watchdog_id}} }}
+                {%- else -%}{{ {} }}{%- endif -%}
+      # ---- cleared: the per-outage cap starts over
+      - conditions:
+          - condition: trigger
+            id: cleared
+          - condition: template
+            value_template: "{{ restart_counter != '' }}"
+        sequence:
+          - action: counter.set_value
+            continue_on_error: true
+            target:
+              entity_id: "{{ restart_counter }}"
+            data:
+              value: 0
