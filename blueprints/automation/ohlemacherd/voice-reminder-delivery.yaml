@@ -124,27 +124,43 @@ triggers:
 conditions:
   # A "due soon" event and a button tap both name their calendar, so two
   # instances of this blueprint (two calendars, two phones) never both act.
+  # A tap is matched by the notification's tag, which this blueprint sets to
+  # voice_reminder_<calendar>_<title>: the Android Companion app does not
+  # echo action_data back on a tap (seen live), the iOS app does, so the tag
+  # is the one thing both carry.
   - condition: template
     value_template: >-
       {% if trigger.id == 'soon' %}
         {{ (trigger.event.data.calendar | default('')) == calendar }}
       {% elif trigger.id in ['snooze', 'done'] %}
-        {{ (trigger.event.data.action_data | default({})).get('calendar', calendar) == calendar }}
+        {% set ad = trigger.event.data.action_data | default({}) %}
+        {% set tag = trigger.event.data.tag | default('', true) | string %}
+        {{ (ad is mapping and ad.get('calendar', '') == calendar)
+           or tag.startswith('voice_reminder_' ~ (calendar | slugify) ~ '_') }}
       {% else %}
         true
       {% endif %}
 
 actions:
   - variables:
+      # Android sends the notification's own title and message back with a
+      # tap, not action_data; iOS sends action_data too. Read whichever is
+      # there, and take the prefix back off the title.
       ad: "{{ trigger.event.data.action_data | default({}) if trigger.id in ['snooze', 'done'] else {} }}"
+      ev_title: >-
+        {%- set t = (trigger.event.data.title | default('', true) | string) if trigger.id in ['snooze', 'done'] else '' -%}
+        {{- t[(title_prefix | length):] if (title_prefix != '' and t.startswith(title_prefix)) else t -}}
+      ev_message: >-
+        {%- set m = (trigger.event.data.message | default('', true) | string) if trigger.id in ['snooze', 'done'] else '' -%}
+        {{- '' if m == 'It is time.' else m -}}
       r_title: >-
         {%- if trigger.id == 'calendar' -%}{{ trigger.calendar_event.summary | default('Reminder', true) }}
         {%- elif trigger.id == 'soon' -%}{{ trigger.event.data.title | default('Reminder', true) }}
-        {%- else -%}{{ ad.get('title', 'Reminder') }}{%- endif -%}
+        {%- else -%}{{ (ad.get('title') if ad is mapping else none) or ev_title or 'Reminder' }}{%- endif -%}
       r_message: >-
         {%- if trigger.id == 'calendar' -%}{{ trigger.calendar_event.description | default('', true) }}
         {%- elif trigger.id == 'soon' -%}{{ trigger.event.data.message | default('', true) }}
-        {%- else -%}{{ ad.get('message', '') }}{%- endif -%}
+        {%- else -%}{{ (ad.get('message') if ad is mapping else none) or ev_message }}{%- endif -%}
       r_due: >-
         {%- if trigger.id == 'soon' -%}{{ trigger.event.data.due }}
         {%- elif trigger.id == 'snooze' -%}{{ (now() + timedelta(minutes=(snooze_minutes | int(60)))).isoformat() }}
@@ -185,7 +201,7 @@ actions:
           message: "{{ r_message if r_message else 'It is time.' }}"
           data: >-
             {%- if companion_app -%}
-              {{ {'tag': 'voice_reminder_' ~ (r_title | slugify),
+              {{ {'tag': 'voice_reminder_' ~ (calendar | slugify) ~ '_' ~ (r_title | slugify),
                   'channel': channel,
                   'actions': [{'action': 'VOICE_REMINDER_SNOOZE', 'title': 'Snooze ' ~ snooze_minutes ~ ' min'},
                               {'action': 'VOICE_REMINDER_DONE', 'title': 'Done'}],
