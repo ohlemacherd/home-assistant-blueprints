@@ -1,0 +1,371 @@
+blueprint:
+  name: Manual Change Hold (a hand beats the automation)
+  description: >
+    When a person adjusts a device by hand - a ceiling fan stepped up with
+    its remote at midnight, a thermostat turned at the dial, a lamp dimmed at
+    the wall - this turns on a Toggle helper that means "someone set this,
+    leave it alone". Your own automations check that Toggle before they write
+    the device and stand down until it clears: when the device is next turned
+    off and on (a fresh session), at a time of day you pick, or after a
+    maximum number of hours. Silent by design. The house quietly doing what
+    someone just asked for is the whole feature.
+
+
+    Why this exists: a temperature-driven fan automation re-evaluates every
+    few minutes. Someone turns the fan to full at 00:39. At 00:44 the
+    automation finds the room at 64 degrees, falls through to its default
+    branch and writes 50 percent over them. Five minutes. The defect was not
+    a threshold. There was no concept of a manual override anywhere in the
+    stack, so the life expectancy of any human choice was one sensor sample.
+
+
+    How it tells a hand from an automation: every state change Home
+    Assistant itself causes carries a context with a parent (the automation
+    or script that did it) or a user (a dashboard, the app, a voice
+    assistant). A change the device reports because someone used its remote,
+    its wall control or the maker's own app carries neither. So "no parent
+    and no user" means the device's own controls, and "no parent" means
+    anyone who is not an automation, dashboard taps included. You choose
+    which counts. A network dropout is not a hand: the device has to go from
+    one real value to a different real value, never through unavailable, and
+    while watching an attribute the state itself must not have changed.
+
+
+    Two kinds of your own writes look like a hand, and both are handled by
+    listing the automations that write the device. First, an automation
+    started by a time, sun or time-pattern trigger writes with no parent
+    (there was no event behind it), so a 07:00 schedule would engage its own
+    hold. Second, a device that reports its new state more than about five
+    seconds after the command - a cover travelling, a long light transition,
+    a cloud thermostat that polls - reports it without the context. A change
+    arriving within the grace period (20 seconds by default; longer for a
+    slow cover) after a listed automation last ran is treated as theirs.
+    Set the notify service for the first week so a false hold shows itself.
+
+
+    Needs one Toggle helper per device. Then add a condition to each
+    automation that writes the device: the Toggle is off. Do NOT gate the
+    automation that turns the device off when the room empties. That one is
+    the release valve, and its turn-off is what makes the next turn-on a
+    fresh session. When no attribute is set (watching on/off itself), the
+    next turn-on IS the hand, so only the daily release or the hours limit
+    ends a hold: set the hours limit to 2-4 in that mode.
+
+
+    Example: fan.bedroom_ceiling_fan, attribute percentage, helper
+    input_boolean.bedroom_fan_hold, "the device's own controls", release on
+    the next off-to-on and at 08:00. The speed automation gets the condition,
+    and the fan stays where it was set until morning.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/manual-change-hold.yaml
+  input:
+    entity:
+      name: Device
+      description: >-
+        The entity people adjust by hand - a fan, a light, a climate entity, a
+        cover, a media player, a switch.
+      selector:
+        entity: {}
+    attribute:
+      name: Attribute to watch (optional)
+      description: >-
+        The attribute a hand changes: percentage for a fan, brightness for a
+        light, temperature (or target_temp_low / target_temp_high) for a
+        thermostat, current_position for a cover, volume_level for a speaker.
+        Leave empty to watch the state itself - a switch or a light turned on
+        or off by hand. One attribute per instance of this blueprint; make a
+        second instance for a second attribute.
+      default: ""
+      selector:
+        text: {}
+    hold_helper:
+      name: Hold helper
+      description: >-
+        A Toggle helper (Settings -> Devices & services -> Helpers -> Create
+        helper -> Toggle) that is on while the hold is in force. Your
+        automations add a condition that it is off. One per device.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    what_counts:
+      name: What counts as a hand
+      description: >-
+        "The device's own controls" engages the hold only for a change that
+        arrives with no user and no automation behind it - the remote, a wall
+        control, the thermostat's dial, the maker's app. "Anyone who is not an
+        automation" also counts a dashboard tap, the Companion app and a voice
+        command. Pick the second for a room where the dashboard is how people
+        adjust things.
+      default: device
+      selector:
+        select:
+          mode: list
+          options:
+            - label: The device's own controls (remote, wall control, maker's app)
+              value: device
+            - label: Anyone who is not an automation (also dashboard, app, voice)
+              value: person
+    writer_automations:
+      name: Automations that write this device
+      description: >-
+        Every automation and script that writes this device whose writes
+        could look like a hand: any that runs on a time, sun or time-pattern
+        trigger (those writes carry no parent), and any whose device takes
+        more than about five seconds to report back (a cover, a long
+        transition, a cloud thermostat that polls). A change arriving within
+        the grace period after one of them last ran is treated as theirs and
+        never engages the hold. Listing a writer that did not need it costs
+        nothing; forgetting one makes it look like a hand.
+      default: []
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: automation
+            - domain: script
+    writer_grace_seconds:
+      name: Grace period after a listed automation runs
+      description: Raise it past the travel time of a slow cover or the poll interval of a cloud device.
+      default: 20
+      selector:
+        number:
+          min: 2
+          max: 300
+          step: 1
+          unit_of_measurement: seconds
+          mode: box
+    release_on_cycle:
+      name: Release when the device is turned off and on again
+      description: >-
+        On (default): the next off-to-on is a fresh session and the hold
+        clears. Right for fans and lights. Turn it off for a thermostat,
+        where "off" is a mode and not a session boundary. Ignored when no
+        attribute is set, because then the off-to-on IS the hand.
+      default: true
+      selector:
+        boolean: {}
+    release_daily:
+      name: Release at a time of day
+      description: >-
+        On (default): the hold clears every day at the time below, however it
+        was engaged. Off: no daily release.
+      default: true
+      selector:
+        boolean: {}
+    release_time:
+      name: Daily release time
+      default: "08:00:00"
+      selector:
+        time: {}
+    max_hold_hours:
+      name: Longest a hold can last (hours, 0 = no limit)
+      description: >-
+        A hold engaged at lunchtime should not disable the evening. Set a
+        number of hours and a hold clears that long after it was engaged. 0
+        means only the releases above end it. With the engaged-at helper
+        below the clock survives a restart or reload; without it the clock
+        starts over, so keep the daily release on as the backstop.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 72
+          step: 1
+          unit_of_measurement: hours
+          mode: box
+    engaged_at_helper:
+      name: Engaged-at helper (optional)
+      description: >-
+        A Date and time helper (Create helper -> Date and/or time -> Date and
+        time) stamped each time a hand is detected, so a dashboard can show
+        when the hold started. Turning on a Toggle that is already on does not
+        update its last-changed time, which is why a separate stamp is offered.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_datetime
+    notify_service:
+      name: Notify service (optional)
+      description: >-
+        Leave empty for silence, which is the point. If set, one message is
+        sent when a hold engages (not again while it is already on), naming
+        the device and the change.
+      default: ""
+      selector:
+        text: {}
+
+# queued: a remote stepped through its speeds a few seconds apart arrives as
+# one event per step, and each one should be read, not dropped.
+mode: queued
+max: 10
+max_exceeded: silent
+
+variables:
+  entity: !input entity
+  attribute: !input attribute
+  hold_helper: !input hold_helper
+  what_counts: !input what_counts
+  writer_automations: !input writer_automations
+  writer_grace_seconds: !input writer_grace_seconds
+  release_on_cycle: !input release_on_cycle
+  release_daily: !input release_daily
+  max_hold_hours: !input max_hold_hours
+  engaged_at_helper: !input engaged_at_helper
+  notify_service: !input notify_service
+
+triggers:
+  # Any change to the device, state or attribute. Which of them matter is
+  # decided in the conditions, because an input cannot switch a trigger
+  # between "the state" and "one attribute".
+  - trigger: state
+    entity_id: !input entity
+    id: changed
+  - trigger: state
+    entity_id: !input entity
+    from: "off"
+    to: "on"
+    id: cycled
+  - trigger: time
+    at: !input release_time
+    id: daily
+  # Fires max_hold_hours after the helper turns on. With 0 hours it fires at
+  # once and the condition below ignores it. A restart or reload drops this
+  # clock, so the two triggers after it re-check against the engaged-at stamp.
+  - trigger: state
+    entity_id: !input hold_helper
+    to: "on"
+    for:
+      hours: !input max_hold_hours
+    id: expired
+  - trigger: homeassistant
+    event: start
+    id: recheck
+  - trigger: time_pattern
+    minutes: "/30"
+    id: recheck
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: changed
+          # Both sides must be a real reading. A dropout goes through
+          # unavailable, and a restart writes a placeholder.
+          - condition: template
+            value_template: >-
+              {{ trigger.from_state is not none and trigger.to_state is not none
+                 and trigger.from_state.state not in ['unavailable', 'unknown']
+                 and trigger.to_state.state not in ['unavailable', 'unknown'] }}
+          # The watched thing moved to a different real value. Watching an
+          # attribute, the state itself must be unchanged: off-to-on brings
+          # attributes with it and is a session boundary, not a hand on the
+          # attribute.
+          - condition: template
+            value_template: >-
+              {% if attribute | trim == '' %}
+                {{ trigger.from_state.state != trigger.to_state.state }}
+              {% else %}
+                {% set o = trigger.from_state.attributes.get(attribute | trim) %}
+                {% set n = trigger.to_state.attributes.get(attribute | trim) %}
+                {{ trigger.from_state.state == trigger.to_state.state
+                   and o is not none and n is not none and o != n }}
+              {% endif %}
+          # Nobody in Home Assistant asked for it.
+          - condition: template
+            value_template: >-
+              {{ trigger.to_state.context.parent_id is none
+                 and (what_counts == 'person' or trigger.to_state.context.user_id is none) }}
+          # ...and none of the listed writers just ran.
+          - condition: template
+            value_template: >-
+              {% set ns = namespace(recent=false) %}
+              {% for w in writer_automations %}
+                {% set lt = state_attr(w, 'last_triggered') %}
+                {% if lt is not none and (now() - lt).total_seconds() < (writer_grace_seconds | int(20)) %}
+                  {% set ns.recent = true %}
+                {% endif %}
+              {% endfor %}
+              {{ not ns.recent }}
+        sequence:
+          # Read before the turn_on below, or it is always true.
+          - variables:
+              hold_was_on: "{{ is_state(hold_helper, 'on') }}"
+              what: >-
+                {%- if attribute | trim == '' -%}
+                  {{ trigger.from_state.state }} -> {{ trigger.to_state.state }}
+                {%- else -%}
+                  {{ attribute | trim }} {{ trigger.from_state.attributes.get(attribute | trim) }} -> {{ trigger.to_state.attributes.get(attribute | trim) }}
+                {%- endif -%}
+          - action: input_boolean.turn_on
+            target:
+              entity_id: "{{ hold_helper }}"
+          - if:
+              - condition: template
+                value_template: "{{ engaged_at_helper != '' }}"
+            then:
+              - action: input_datetime.set_datetime
+                continue_on_error: true
+                target:
+                  entity_id: "{{ engaged_at_helper }}"
+                data:
+                  timestamp: "{{ now().timestamp() }}"
+          - if:
+              - condition: template
+                value_template: "{{ notify_service != '' and not hold_was_on }}"
+            then:
+              - action: "{{ notify_service }}"
+                continue_on_error: true
+                data:
+                  title: "Manual hold: {{ state_attr(entity, 'friendly_name') or entity }}"
+                  message: "Set by hand ({{ what }}). Automations stand down until the hold clears."
+      - conditions:
+          - condition: trigger
+            id: cycled
+          - condition: template
+            value_template: "{{ release_on_cycle and (attribute | trim) != '' }}"
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ hold_helper }}"
+      - conditions:
+          - condition: trigger
+            id: daily
+          - condition: template
+            value_template: "{{ release_daily }}"
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ hold_helper }}"
+      - conditions:
+          - condition: trigger
+            id: expired
+          - condition: template
+            value_template: "{{ (max_hold_hours | int(0)) > 0 }}"
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ hold_helper }}"
+      # After a restart, and every half hour: a hold older than the limit by
+      # its engaged-at stamp is released. Needs the stamp; without it there
+      # is nothing to measure against.
+      - conditions:
+          - condition: trigger
+            id: recheck
+          - condition: template
+            value_template: >-
+              {% set ea = (states(engaged_at_helper) | as_datetime) if engaged_at_helper != '' else none %}
+              {{ (max_hold_hours | int(0)) > 0
+                 and is_state(hold_helper, 'on')
+                 and ea is not none
+                 and (now() - (ea | as_local)).total_seconds() >= (max_hold_hours | int) * 3600 }}
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: "{{ hold_helper }}"
+    # No default on purpose: a change made by an automation falls through
+    # doing nothing. Clearing the hold here would let the next sensor tick
+    # undo the person within seconds, which is the bug this exists to close.

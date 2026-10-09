@@ -1,0 +1,193 @@
+blueprint:
+  name: Voice Assistant Tool - Set a Reminder
+  description: >
+    Gives an AI voice assistant in Home Assistant (Assist with an LLM
+    conversation agent - Anthropic, OpenAI, Google, Ollama, ...) the ability
+    to set reminders and timers: "remind me at 7:30 to confirm the dentist",
+    "set a timer for 10 minutes", "in an hour, ping me to move the laundry".
+    A script exposed to Assist IS a tool. The model reads this script's
+    description to learn what it does, reads the fields to learn what to
+    pass, calls it, and reads what it returns. This one writes the reminder
+    to a calendar you choose (a Local Calendar is ideal) and returns at
+    once, so the assistant can answer "set for 7:30" without waiting. The
+    companion automation, "Voice Assistant Reminder Delivery", watches that
+    calendar and pushes the reminder when it comes due, with Snooze and Done
+    buttons.
+
+
+    Why a calendar? It is the memory. A reminder for tomorrow survives a
+    restart, shows on a dashboard, and can be edited or deleted like any
+    event. One wrinkle: Home Assistant's calendar trigger refreshes its
+    window every 15 minutes, so an event created a few minutes before its
+    start never fires. Reminders due sooner than the threshold below are
+    therefore not written to the calendar. They are handed to the delivery
+    automation as an event, and it waits them out in memory. A restart in
+    that quarter-hour loses them, which is fine for a timer.
+
+
+    Needs: a calendar the script may write to (Settings -> Devices &
+    services -> Add integration -> Local Calendar, named "Reminders"), the
+    delivery automation imported and pointed at the same calendar, and this
+    script exposed to Assist (Settings -> Voice assistants -> Expose).
+
+
+    ONE STEP THAT MATTERS. When you save the script, the save dialog asks for
+    a name and a description. What you type in Description is what the model
+    reads to decide when to call this tool; the blueprint's own text does
+    not reach it, and an empty box means the model is told nothing. Click
+    "Add description" and paste: "Set a reminder or a timer for the person
+    speaking. Use for 'remind me', 'don't let me forget', 'ping me at', 'in
+    an hour', and for a timer when no built-in timer is offered. Give a
+    short title and EITHER a clock time (at) OR minutes from now
+    (in_minutes). Returns when it is set for and how it will be delivered."
+    The fields below carry the exact formats, and those always reach the
+    model.
+  domain: script
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/script/ohlemacherd/voice-reminder-tool.yaml
+  input:
+    calendar:
+      name: Reminders calendar
+      description: >-
+        The calendar reminders are written to. A Local Calendar made for the
+        purpose keeps them apart from the family's real events.
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+    short_minutes:
+      name: Hold in memory when due within (minutes)
+      description: >-
+        A reminder due sooner than this is not written to the calendar,
+        whose trigger would miss it, but handed to the delivery automation
+        to wait out. 20 is safe for the 15-minute refresh. Set the same
+        number in the delivery automation.
+      default: 20
+      selector:
+        number:
+          min: 16
+          max: 120
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    default_minutes:
+      name: If the assistant gives no time (minutes from now)
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 1440
+          step: 5
+          unit_of_measurement: minutes
+          mode: box
+
+# Each call is one reminder, and several may be set in one conversation.
+mode: parallel
+max: 10
+# Reaches the model only for a script written in YAML. A script saved in
+# the UI carries its own description (the save dialog's box), which replaces
+# this one - see the blueprint description. The field descriptions below
+# cannot be replaced, so the formats live there.
+description: >-
+  Set a reminder or a timer for the person speaking. Use for "remind me",
+  "don't let me forget", "ping me at", "in an hour", and for a timer when no
+  built-in timer is offered. Give a short title and EITHER a clock time (at)
+  OR minutes from now (in_minutes). Returns when it is set for and how it
+  will be delivered.
+fields:
+  title:
+    name: Title
+    description: What to remind about, a few words. For a timer, "Timer".
+    example: Confirm the dentist appointment
+    required: true
+    selector:
+      text: {}
+  at:
+    name: Clock time
+    description: >-
+      Clock time as HH:MM, 24-hour (07:30, 19:15). Today if still ahead,
+      otherwise tomorrow. Use EITHER this OR in_minutes, never both.
+    example: "07:30"
+    selector:
+      text: {}
+  in_minutes:
+    name: Minutes from now
+    description: >-
+      Minutes from now, for "in an hour" (60) or a timer ("set a timer for
+      10 minutes" = 10). Use EITHER this OR at, never both.
+    example: 45
+    selector:
+      number:
+        min: 1
+        max: 1440
+        mode: box
+  message:
+    name: Message
+    description: Optional detail shown under the title when the reminder arrives.
+    example: The confirmation email is still unread
+    selector:
+      text: {}
+
+variables:
+  calendar: !input calendar
+  short_minutes: !input short_minutes
+  default_minutes: !input default_minutes
+
+sequence:
+  - variables:
+      # When it is due, as an ISO date-time with the local offset. A clock
+      # time already past today means tomorrow. Anything unreadable falls
+      # back to the default, so the assistant always gets a reminder set
+      # rather than an error.
+      due: >-
+        {%- set mins = in_minutes | default('', true) | string | trim -%}
+        {%- set clock = at | default('', true) | string | trim -%}
+        {%- if mins != '' and (mins | int(0)) > 0 -%}
+          {{ (now() + timedelta(minutes=(mins | int))).isoformat() }}
+        {%- elif clock != '' and ':' in clock -%}
+          {%- set hh = clock.split(':')[0] | int(-1) -%}
+          {%- set mm = clock.split(':')[1][:2] | int(-1) -%}
+          {%- if hh >= 0 and hh <= 23 and mm >= 0 and mm <= 59 -%}
+            {%- set t = now().replace(hour=hh, minute=mm, second=0, microsecond=0) -%}
+            {%- if t <= now() -%}{%- set t = t + timedelta(days=1) -%}{%- endif -%}
+            {{ t.isoformat() }}
+          {%- else -%}
+            {{ (now() + timedelta(minutes=(default_minutes | int(60)))).isoformat() }}
+          {%- endif -%}
+        {%- else -%}
+          {{ (now() + timedelta(minutes=(default_minutes | int(60)))).isoformat() }}
+        {%- endif -%}
+      secs: "{{ [((as_timestamp(due) - as_timestamp(now())) | int), 1] | max }}"
+      body: "{{ message | default('', true) | string }}"
+      short: "{{ secs < (short_minutes | int(20)) * 60 }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ short }}"
+        sequence:
+          # Handed to the delivery automation, which waits it out. An event
+          # returns immediately, so the tool call does too.
+          - event: voice_reminder_due_soon
+            event_data:
+              title: "{{ title }}"
+              message: "{{ body }}"
+              due: "{{ due }}"
+              calendar: "{{ calendar }}"
+    default:
+      - action: calendar.create_event
+        target:
+          entity_id: "{{ calendar }}"
+        data:
+          summary: "{{ title }}"
+          description: "{{ body }}"
+          start_date_time: "{{ due }}"
+          end_date_time: "{{ (as_datetime(due) + timedelta(minutes=15)).isoformat() }}"
+  # Returned to the assistant.
+  - variables:
+      result:
+        title: "{{ title }}"
+        set_for: "{{ (as_datetime(due) | as_local).strftime('%A %H:%M') }}"
+        how: "{{ 'held in memory and pushed at the time' if short else 'written to the reminders calendar and pushed when it starts' }}"
+  - stop: Reminder set
+    response_variable: result
