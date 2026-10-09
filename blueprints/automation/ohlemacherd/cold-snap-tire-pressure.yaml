@@ -1,0 +1,219 @@
+blueprint:
+  name: Cold Snap Tire Pressure Estimate (from air temperature, not a sensor)
+  description: >
+    Tires lose about 1 PSI for every 10 degrees Fahrenheit the air cools (1
+    PSI per 5.5 degrees Celsius). When the outdoor temperature has been 20
+    degrees or more below the temperature at which you last set the tires,
+    they are at least 2 PSI low - the point where it is worth a top-up
+    rather than waiting for the dashboard light. This estimates that drift
+    from an outdoor temperature sensor and a Number helper holding the
+    temperature on the day you last filled them, and sends one note when the
+    estimated drop crosses your line.
+
+
+    This is NOT a tire pressure reading, and the message says so. It is
+    blind in the one direction that matters most: a slow leak drops pressure
+    with no temperature change at all, and this will never see it. It is a
+    seasonal nudge, not a sensor.
+
+
+    Quiet by design: the months you choose, a hold so a two-hour dip does
+    not count, one note every N days at most, and an optional "quiet" entity
+    so a cold front that crosses the line at 3am waits for the morning
+    re-check. Fill the tires, set the Number helper to today's temperature,
+    and it goes quiet on its own.
+
+
+    Example: outdoor sensor, helper input_number.car_tire_fill_temp set to 55
+    on the day you filled them to 35 PSI; nudge at 2 PSI low, October to
+    April, once per 10 days.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/cold-snap-tire-pressure.yaml
+  input:
+    outdoor_temp:
+      name: Outdoor temperature sensor
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    fill_temp_helper:
+      name: "\"Outdoor temperature when the tires were last set\" helper"
+      description: >-
+        A Number helper (Create helper -> Number) in the same unit as the
+        sensor. Set it to the outdoor temperature on the day you fill the
+        tires. Unknown or unset means this does nothing.
+      selector:
+        entity:
+          filter:
+            - domain: input_number
+    degrees_per_psi:
+      name: Degrees of cooling per 1 PSI
+      description: 10 for Fahrenheit, 5.5 for Celsius.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 0.5
+          mode: box
+    low_psi:
+      name: Nudge when the estimated drop reaches (PSI)
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 10
+          step: 0.5
+          unit_of_measurement: PSI
+          mode: box
+    hold_hours:
+      name: Hours below the line before it counts
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 24
+          step: 1
+          unit_of_measurement: hours
+          mode: box
+    months:
+      name: Months to watch
+      default: ["10", "11", "12", "1", "2", "3", "4"]
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - label: January
+              value: "1"
+            - label: February
+              value: "2"
+            - label: March
+              value: "3"
+            - label: April
+              value: "4"
+            - label: May
+              value: "5"
+            - label: June
+              value: "6"
+            - label: July
+              value: "7"
+            - label: August
+              value: "8"
+            - label: September
+              value: "9"
+            - label: October
+              value: "10"
+            - label: November
+              value: "11"
+            - label: December
+              value: "12"
+    every_days:
+      name: At most one note every (days)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: days
+          mode: box
+    recheck_time:
+      name: Morning re-check
+      description: A dip that crossed the line in the night is re-checked here, after the quiet entity below has turned off.
+      default: "07:30:00"
+      selector:
+        time: {}
+    quiet_entity:
+      name: Hold the note while this entity is on (optional)
+      description: A "quiet hours" Toggle or Schedule; the morning re-check sends the note once it is off.
+      default: ""
+      selector:
+        entity: {}
+    target_psi:
+      name: Target pressure (for the message)
+      default: 35
+      selector:
+        number:
+          min: 20
+          max: 80
+          step: 1
+          unit_of_measurement: PSI
+          mode: box
+    car_name:
+      name: What to call the car
+      default: the car
+      selector:
+        text: {}
+    notify_service:
+      name: Notify service
+      default: notify.persistent_notification
+      selector:
+        text: {}
+
+mode: single
+max_exceeded: silent
+
+variables:
+  outdoor_temp: !input outdoor_temp
+  fill_temp_helper: !input fill_temp_helper
+  degrees_per_psi: !input degrees_per_psi
+  low_psi: !input low_psi
+  months: !input months
+  every_days: !input every_days
+  quiet_entity: !input quiet_entity
+  target_psi: !input target_psi
+  car_name: !input car_name
+  notify_service: !input notify_service
+
+trigger_variables:
+  outdoor_temp: !input outdoor_temp
+  fill_temp_helper: !input fill_temp_helper
+  degrees_per_psi: !input degrees_per_psi
+  low_psi: !input low_psi
+
+triggers:
+  - trigger: template
+    value_template: >-
+      {% set t = states(outdoor_temp) | float(none) %}
+      {% set f = states(fill_temp_helper) | float(none) %}
+      {{ t is not none and f is not none and (f - t) / (degrees_per_psi | float) >= (low_psi | float) }}
+    for:
+      hours: !input hold_hours
+    id: crossed
+  - trigger: time
+    at: !input recheck_time
+    id: recheck
+
+conditions:
+  - condition: template
+    value_template: "{{ (now().month | string) in (months | map('string') | list) }}"
+  - condition: template
+    value_template: >-
+      {% set t = states(outdoor_temp) | float(none) %}
+      {% set f = states(fill_temp_helper) | float(none) %}
+      {{ t is not none and f is not none and (f - t) / (degrees_per_psi | float) >= (low_psi | float) }}
+  - condition: template
+    value_template: "{{ quiet_entity == '' or not is_state(quiet_entity, 'on') }}"
+  - condition: template
+    value_template: >-
+      {{ this.attributes.last_triggered is none
+         or (now() - this.attributes.last_triggered).total_seconds() > (every_days | int) * 86400 }}
+
+actions:
+  - variables:
+      t: "{{ states(outdoor_temp) | float(0) }}"
+      f: "{{ states(fill_temp_helper) | float(0) }}"
+      drop: "{{ ((f - t) / (degrees_per_psi | float)) | round(1) }}"
+  - action: "{{ notify_service }}"
+    continue_on_error: true
+    data:
+      title: "{{ car_name | capitalize }}: tires are probably running low"
+      message: >-
+        {{ t | round(0) | int }}° out against {{ f | round(0) | int }}° when the tires were last set, so they are
+        around {{ (target_psi | float - (drop | float)) | round(0) | int }} PSI cold instead of {{ target_psi }}
+        (about {{ drop }} PSI down). Top up, then set the fill-temperature helper to today's outdoor temperature
+        to reset this. Estimated from air temperature only - it cannot see a slow leak.

@@ -1,0 +1,190 @@
+blueprint:
+  name: Trash Night Reminder (holiday-shift aware)
+  description: >
+    An evening push the night before pickup - and on a holiday week, the
+    night before the SHIFTED pickup. Most haulers slide the route one day
+    when one of their observed holidays falls on or before your pickup day
+    in that week, and most of them publish no feed you could subscribe to.
+    This models the rule instead: give it your pickup weekday and a holiday
+    calendar (the core Holiday integration makes one for your country with
+    no account; the Google Calendar integration's "Holidays in <country>"
+    works too), name the holidays your hauler actually observes, and the
+    reminder lands on the right night every time: the evening before pickup
+    normally, a day later when a Monday holiday moves a Tuesday route to
+    Wednesday. Never both.
+
+
+    Optional: a Toggle helper this keeps ON from the Monday of a shift week
+    through the shifted pickup day, so other automations (a camera check
+    that looks for the bins) can follow the same calendar instead of
+    guessing. The two can never disagree about which night it is.
+
+
+    Why name the holidays? A holiday calendar can include observances that
+    shift nothing (Valentine's Day, Christmas Eve). Only the ones in your
+    list count, matched on the event's title, so write "Christmas Day", not
+    "Christmas".
+
+
+    Example: pickup Tuesday, calendar.holidays, holidays "New Year's Day,
+    Memorial Day, Independence Day, Labor Day, Thanksgiving, Christmas Day",
+    reminder 18:00. On Labor Day week the push comes Tuesday evening and
+    says pickup is Wednesday.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/trash-night-holiday-shift.yaml
+  input:
+    pickup_weekday:
+      name: Normal pickup day
+      default: tue
+      selector:
+        select:
+          mode: list
+          options:
+            - label: Monday
+              value: mon
+            - label: Tuesday
+              value: tue
+            - label: Wednesday
+              value: wed
+            - label: Thursday
+              value: thu
+            - label: Friday
+              value: fri
+            - label: Saturday
+              value: sat
+    holiday_calendar:
+      name: Holiday calendar (optional)
+      description: >-
+        A calendar whose events are holidays - the core Holiday integration
+        (Settings -> Devices & services -> Add integration -> Holiday) needs
+        no account and lists public holidays only. Leave empty for a plain
+        weekly reminder with no shift logic.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: calendar
+    holidays:
+      name: Holidays your hauler observes
+      description: >-
+        Comma-separated, matched against the event title without caring
+        about case. The match is "contains", so use the full name: "Christmas
+        Day" rather than "Christmas", which would also match Christmas Eve.
+        Only a listed holiday that falls on or before your pickup day in a
+        week shifts that week's pickup one day later.
+      default: "New Year's Day, Memorial Day, Independence Day, Labor Day, Thanksgiving, Christmas Day"
+      selector:
+        text:
+          multiline: true
+    reminder_time:
+      name: Reminder time (the evening before)
+      default: "18:00:00"
+      selector:
+        time: {}
+    notify_service:
+      name: Notify service
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    title:
+      name: Push title
+      default: Bins out tonight
+      selector:
+        text: {}
+    message:
+      name: Push message
+      description: May use {{ pickup_day }} (the day's name) and {{ shifted }} (true on a holiday week).
+      default: "{% if shifted %}Holiday week - pickup is {{ pickup_day }}, a day late.{% else %}Pickup is {{ pickup_day }}.{% endif %} Carts to the curb by morning."
+      selector:
+        text:
+          multiline: true
+    shifted_helper:
+      name: "\"Shift week\" Toggle (optional)"
+      description: >-
+        A Toggle helper kept ON from the Monday of a shift week through the
+        shifted pickup day, and OFF otherwise, so other automations can gate
+        on it. Updated every night just after midnight.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+
+mode: single
+max_exceeded: silent
+
+variables:
+  pickup_weekday: !input pickup_weekday
+  holiday_calendar: !input holiday_calendar
+  holidays: !input holidays
+  shifted_helper: !input shifted_helper
+  notify_service: !input notify_service
+  pickup_idx: "{{ ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].index(pickup_weekday) }}"
+
+triggers:
+  - trigger: time
+    at: !input reminder_time
+    id: remind
+  - trigger: time
+    at: "00:05:00"
+    id: nightly
+
+actions:
+  # The reminder looks at TOMORROW's week (a Sunday-evening reminder for a
+  # Monday pickup belongs to next week); the nightly helper update looks at
+  # today's.
+  - variables:
+      ref: "{{ (now().date() + timedelta(days=(1 if trigger.id == 'remind' else 0))) | string }}"
+      ref_wd: "{{ (ref | as_datetime).weekday() }}"
+      week_monday: "{{ ((ref | as_datetime).date() - timedelta(days=(ref_wd | int))) | string }}"
+      pickup_date: "{{ ((week_monday | as_datetime).date() + timedelta(days=(pickup_idx | int))) | string }}"
+  # Holidays from the Monday of that week to the end of the normal pickup day.
+  - if:
+      - condition: template
+        value_template: "{{ holiday_calendar != '' }}"
+    then:
+      - action: calendar.get_events
+        continue_on_error: true
+        target:
+          entity_id: "{{ holiday_calendar }}"
+        data:
+          start_date_time: "{{ week_monday }} 00:00:00"
+          end_date_time: "{{ ((pickup_date | as_datetime).date() + timedelta(days=1)) | string }} 00:00:00"
+        response_variable: cal
+  - variables:
+      shifted: >-
+        {% set wanted = (holidays | string).split(',') | map('trim') | map('lower') | reject('eq', '') | list %}
+        {% set ns = namespace(hit=false) %}
+        {% if cal is defined and holiday_calendar in cal %}
+          {% for ev in (cal[holiday_calendar].events | default([])) %}
+            {% set t = (ev.summary | default('', true) | string | lower) %}
+            {% for w in wanted %}{% if w in t %}{% set ns.hit = true %}{% endif %}{% endfor %}
+          {% endfor %}
+        {% endif %}
+        {{ ns.hit }}
+      effective_idx: "{{ (pickup_idx | int) + (1 if shifted else 0) }}"
+      pickup_day: "{{ ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][effective_idx | int] }}"
+      # Nightly run: Monday through the shifted pickup day of a shift week.
+      in_shift_week: "{{ shifted and (ref_wd | int) <= (effective_idx | int) }}"
+      # Reminder run: tomorrow (ref) is the effective pickup day.
+      tonight: "{{ (ref_wd | int) == (effective_idx | int) }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'nightly' and shifted_helper != '' }}"
+        sequence:
+          - action: "input_boolean.turn_{{ 'on' if in_shift_week else 'off' }}"
+            continue_on_error: true
+            target:
+              entity_id: "{{ shifted_helper }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'remind' and tonight }}"
+        sequence:
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: !input title
+              message: !input message

@@ -242,30 +242,80 @@ actions:
   - variables:
       daypart: >-
         {{ 'morning' if now().hour < 12 else ('afternoon' if now().hour < 17 else 'evening') }}
-      today_iso: "{{ now().date().isoformat() }}"
-      tomorrow_iso: "{{ (now() + timedelta(days=1)).date().isoformat() }}"
-      # Calendar lines: "HH:MM Summary" (all-day events carry no time).
+      # Calendar lines. The day an event is on is the LOCAL date it starts,
+      # never the first ten characters of whatever string the calendar sent:
+      # a feed that reports in UTC would otherwise put an 8:30 PM event on
+      # tomorrow. An all-day event is listed on EVERY day it covers (Home
+      # Assistant reports its end as the exclusive next date), as "day N of
+      # M" when it spans more than one, so a four-day trip does not vanish
+      # after its first morning. A timed event that has already ended is
+      # dropped from today's list - a 10:00 appointment must not read as
+      # upcoming on an evening run - and one that is under way is labelled.
+      # A timed event that crosses midnight stays on its first day. An
+      # event whose times cannot be parsed is kept on its raw date rather
+      # than lost: a missing line costs more than an extra one.
       cal_lines: >-
         {% set ns = namespace(t=[], m=[], u=[]) %}
+        {% set today = now().date() %}
+        {% set tomorrow = today + timedelta(days=1) %}
         {% for cid, c in (cal | default({})).items() %}
           {% for ev in (c.events | default([])) %}
-            {% set s = ev.start | string %}
-            {% set d = s[:10] %}
-            {% set tm = (s[11:16] ~ ' ') if s | length > 10 else '' %}
-            {% set line = tm ~ (ev.summary | default('') | string) %}
-            {% if d == today_iso %}{% set ns.t = ns.t + [line] %}
-            {% elif d == tomorrow_iso %}{% set ns.m = ns.m + [line] %}
-            {% elif d > tomorrow_iso %}{% set ns.u = ns.u + [d ~ ' ' ~ line] %}
+            {% set s = ev.start | default('', true) | string %}
+            {% set e = ev.end | default('', true) | string %}
+            {% set title = ev.summary | default('(untitled)', true) | string %}
+            {% set all_day = s != '' and 'T' not in s %}
+            {% set sdt = (((s[0:10] ~ 'T00:00:00') if all_day else s) | as_datetime) if s != '' else none %}
+            {% set edt = (((e[0:10] ~ 'T00:00:00') if all_day else e) | as_datetime) if e != '' else none %}
+            {% if sdt is none %}
+              {% set d = s[0:10] %}
+              {% if d == today | string %}{% set ns.t = ns.t + [{'k': '2' ~ title, 'line': title}] %}
+              {% elif d == tomorrow | string %}{% set ns.m = ns.m + [{'k': '2' ~ title, 'line': title}] %}
+              {% elif d > tomorrow | string %}{% set ns.u = ns.u + [{'k': d, 'line': d ~ ' ' ~ title}] %}
+              {% endif %}
+            {% elif all_day %}
+              {% set sd = (sdt | as_local).date() %}
+              {% set m = ((edt | as_local).date() - sd).days if edt is not none else 1 %}
+              {% set m = m if m >= 1 else 1 %}
+              {% set ed = sd + timedelta(days=m) %}
+              {% if sd <= today and today < ed %}
+                {% set ns.t = ns.t + [{'k': '0' ~ title, 'line': 'all day: ' ~ title ~ ((' (day ' ~ ((today - sd).days + 1) ~ ' of ' ~ m ~ ')') if m > 1 else '')}] %}
+              {% endif %}
+              {% if sd <= tomorrow and tomorrow < ed %}
+                {% set ns.m = ns.m + [{'k': '0' ~ title, 'line': 'all day: ' ~ title ~ ((' (day ' ~ ((tomorrow - sd).days + 1) ~ ' of ' ~ m ~ ')') if m > 1 else '')}] %}
+              {% endif %}
+              {% if sd > tomorrow %}
+                {% set ns.u = ns.u + [{'k': sd | string, 'line': (sd | string) ~ ' all day: ' ~ title ~ ((' (' ~ m ~ ' days)') if m > 1 else '')}] %}
+              {% endif %}
+            {% else %}
+              {% set sl = sdt | as_local %}
+              {% set sd = sl.date() %}
+              {% set hm = sl.strftime('%H:%M') %}
+              {% set ended = edt is not none and now() >= (edt | as_local) %}
+              {% if sd == today and not ended %}
+                {% set ns.t = ns.t + [{'k': '1' ~ hm, 'line': hm ~ ' ' ~ title ~ (' (under way now)' if now() >= sl else '')}] %}
+              {% elif sd == tomorrow %}
+                {% set ns.m = ns.m + [{'k': '1' ~ hm, 'line': hm ~ ' ' ~ title}] %}
+              {% elif sd > tomorrow %}
+                {% set ns.u = ns.u + [{'k': (sd | string) ~ hm, 'line': (sd | string) ~ ' ' ~ hm ~ ' ' ~ title}] %}
+              {% endif %}
             {% endif %}
           {% endfor %}
         {% endfor %}
-        {{ {'today': ns.t | sort, 'tomorrow': ns.m | sort, 'upcoming': (ns.u | sort)[:12]} }}
+        {{ {'today': ns.t | sort(attribute='k') | map(attribute='line') | list,
+            'tomorrow': ns.m | sort(attribute='k') | map(attribute='line') | list,
+            'upcoming': (ns.u | sort(attribute='k') | map(attribute='line') | list)[:12]} }}
+      # To-do lines: "YYYY-MM-DD Summary", soonest first, an overdue item
+      # says so. A due date-time is read in local time, not sliced as text.
       task_lines: >-
         {% set ns = namespace(l=[]) %}
+        {% set today = now().date() | string %}
         {% if todos is defined and todo_list in todos %}
           {% for it in (todos[todo_list]['items'] | default([])) %}
-            {% if it.due is defined and it.due %}
-              {% set ns.l = ns.l + [(it.due | string)[:10] ~ ' ' ~ (it.summary | default('') | string)] %}
+            {% set due = it.due | default('', true) | string %}
+            {% if due != '' %}
+              {% set ddt = due | as_datetime %}
+              {% set d = ((ddt | as_local).date() | string) if ddt is not none else due[0:10] %}
+              {% set ns.l = ns.l + [d ~ ' ' ~ (it.summary | default('', true) | string) ~ (' (overdue)' if d < today else '')] %}
             {% endif %}
           {% endfor %}
         {% endif %}

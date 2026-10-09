@@ -1,0 +1,271 @@
+blueprint:
+  name: Room Temperature Safety Alert (never gated, and it notices a dead sensor)
+  description: >
+    A hard floor and ceiling for one room - a nursery, an elderly parent's
+    room, a server closet, a pet's room - with the two properties a safety
+    alert needs and most comfort automations lack. First, it is never gated:
+    no "automations enabled" switch, no quiet hours, no mode can turn it
+    off, because the day it was found behind a kill switch it had fired
+    silently for an hour. Second, it knows when it has gone blind: a
+    temperature trigger never fires while its sensor is unavailable, so a
+    dead battery disarms the alert with no other sign. Here a sensor that is
+    unavailable, or has not reported at all, for about two hours is itself
+    an alert - checked hourly, so a restart in between cannot lose it.
+
+
+    What it does: when the room has been below the floor or above the
+    ceiling for the hold time, one high-priority push and a persistent
+    notification as the durable record; when it comes back inside the band
+    the record is dismissed. Optionally a script runs when the alarm raises
+    - a heater, a vent, a fan - and that is the only part you may gate, in
+    the script itself.
+
+
+    Implausible readings are ignored: a sensor that reports 0 or 185 on a
+    glitch should not wake anyone. The band of readings that count is an
+    input, in the sensor's unit. One limit to know: an integration that
+    keeps showing a dead device's last value (some Zigbee setups with
+    availability tracking off) looks healthy to the "not reported" test for
+    as long as it keeps re-reporting that value.
+
+
+    Example: sensor.kids_room_temperature, floor 65, ceiling 73, 15 minutes,
+    plausible 40 to 110, offline alert after 2 hours.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/room-temperature-safety.yaml
+  input:
+    temp_sensor:
+      name: Room temperature sensor
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: temperature
+    room_name:
+      name: Room name
+      default: the room
+      selector:
+        text: {}
+    floor:
+      name: Floor
+      description: Alert when the room has been below this for the hold time. In the sensor's unit - 65 °F or 18 °C.
+      default: 65
+      selector:
+        number:
+          min: -20
+          max: 100
+          step: 0.5
+          mode: box
+    ceiling:
+      name: Ceiling
+      description: Alert when the room has been above this for the hold time. In the sensor's unit - 73 °F or 23 °C.
+      default: 73
+      selector:
+        number:
+          min: -10
+          max: 120
+          step: 0.5
+          mode: box
+    hold_minutes:
+      name: Out of band for this long before alerting
+      default: 15
+      selector:
+        number:
+          min: 1
+          max: 120
+          step: 1
+          unit_of_measurement: minutes
+          mode: box
+    plausible_min:
+      name: Lowest reading to believe
+      description: >-
+        Below this the reading is a sensor glitch, not a room. In the
+        sensor's unit, and it must be below the floor: 40 for Fahrenheit, 5
+        for Celsius.
+      default: 40
+      selector:
+        number:
+          min: -40
+          max: 100
+          step: 1
+          mode: box
+    plausible_max:
+      name: Highest reading to believe
+      description: Must be above the ceiling - 110 for Fahrenheit, 45 for Celsius.
+      default: 110
+      selector:
+        number:
+          min: 0
+          max: 200
+          step: 1
+          mode: box
+    offline_hours:
+      name: Sensor silent for this long is an alert (hours)
+      description: Unavailable, or not reported at all, for this long. Checked once an hour, so the alert arrives within the hour after.
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 48
+          step: 1
+          unit_of_measurement: hours
+          mode: box
+    notify_service:
+      name: Notify service
+      description: notify.mobile_app_<your phone>, or a notify group that reaches every adult.
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    companion_app:
+      name: Is the notify service the Companion app?
+      description: On (default) sends at high priority so the phone's battery saver does not hold it.
+      default: true
+      selector:
+        boolean: {}
+    action_script:
+      name: Script to run when the alarm raises (optional)
+      description: >-
+        A heater, a vent, a fan. It runs after the alert is sent, never
+        before, and a failure in it cannot stop the alert. If your HVAC has a
+        master switch, check it inside this script, not here.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: script
+    tell_when_back:
+      name: Push when the room is back inside the band
+      default: false
+      selector:
+        boolean: {}
+
+mode: queued
+max: 6
+max_exceeded: silent
+
+# Trigger templates see only these, not the variables block below.
+trigger_variables:
+  temp_sensor: !input temp_sensor
+  floor: !input floor
+  ceiling: !input ceiling
+
+variables:
+  temp_sensor: !input temp_sensor
+  room_name: !input room_name
+  floor: !input floor
+  ceiling: !input ceiling
+  offline_hours: !input offline_hours
+  notify_service: !input notify_service
+  companion_app: !input companion_app
+  action_script: !input action_script
+  tell_when_back: !input tell_when_back
+  record_id: "room_temperature_safety_{{ temp_sensor | slugify }}"
+  push_data: >-
+    {%- if companion_app -%}{{ {'priority': 'high', 'ttl': 0, 'tag': record_id} }}{%- else -%}{{ {} }}{%- endif -%}
+
+triggers:
+  - trigger: numeric_state
+    entity_id: !input temp_sensor
+    below: !input floor
+    above: !input plausible_min
+    for:
+      minutes: !input hold_minutes
+    id: cold
+  - trigger: numeric_state
+    entity_id: !input temp_sensor
+    above: !input ceiling
+    below: !input plausible_max
+    for:
+      minutes: !input hold_minutes
+    id: hot
+  # Hourly: unavailable, or silent, for offline_hours. A state trigger with
+  # `for:` would lose its clock on a restart and never see a sensor that was
+  # already dead when Home Assistant started; this check does not care how
+  # it got there.
+  - trigger: time_pattern
+    minutes: "17"
+    id: silent
+  # Back inside the band (a crossing in either direction).
+  - trigger: template
+    value_template: >-
+      {% set t = states(temp_sensor) | float(none) %}
+      {{ t is not none and (floor | float) <= t <= (ceiling | float) }}
+    id: back
+
+# No conditions on purpose. Nothing may gate this.
+
+actions:
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id in ['cold', 'hot'] }}"
+        sequence:
+          - variables:
+              what: "{{ 'below ' ~ floor if trigger.id == 'cold' else 'above ' ~ ceiling }}"
+              title: "{{ room_name | capitalize }} {{ what }}"
+              body: >-
+                {{ room_name | capitalize }} has been {{ what }} for {{ (trigger.for.total_seconds() / 60) | int if trigger.for is defined else '' }} minutes
+                (now {{ states(temp_sensor) }}).
+          # The push goes first; the record and the script come after, so a
+          # failure in either cannot stop it.
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: "{{ title }}"
+              message: "{{ body }}"
+              data: "{{ push_data }}"
+          - action: persistent_notification.create
+            continue_on_error: true
+            data:
+              notification_id: "{{ record_id }}"
+              title: "{{ title }}"
+              message: "{{ body }} Raised at {{ now().strftime('%H:%M') }}. This record clears when the room is back inside the band."
+          - if:
+              - condition: template
+                value_template: "{{ action_script != '' }}"
+            then:
+              - action: script.turn_on
+                continue_on_error: true
+                target:
+                  entity_id: "{{ action_script }}"
+      # Silent sensor: one alert, in the hour after the threshold is crossed.
+      # last_reported moves on every report, even one that repeats the value.
+      - conditions:
+          - condition: trigger
+            id: silent
+          - condition: template
+            value_template: >-
+              {% set s = states[temp_sensor] %}
+              {% set age = (now() - s.last_reported).total_seconds() if s is not none else 0 %}
+              {% set dead = s is none or s.state in ['unavailable', 'unknown'] or age >= (offline_hours | int) * 3600 %}
+              {{ dead and (offline_hours | int) * 3600 <= age < ((offline_hours | int) + 1) * 3600 }}
+        sequence:
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: "{{ room_name | capitalize }}: temperature sensor silent"
+              message: >-
+                {{ state_attr(temp_sensor, 'friendly_name') or temp_sensor }} has been unavailable or has not reported for
+                {{ offline_hours }}+ hours. The temperature alert for this room is blind until it returns - check the battery
+                or the integration.
+              data: "{{ push_data }}"
+      - conditions:
+          - condition: trigger
+            id: back
+        sequence:
+          - action: persistent_notification.dismiss
+            continue_on_error: true
+            data:
+              notification_id: "{{ record_id }}"
+          - if:
+              - condition: template
+                value_template: "{{ tell_when_back }}"
+            then:
+              - action: "{{ notify_service }}"
+                continue_on_error: true
+                data:
+                  title: "{{ room_name | capitalize }} back inside the band"
+                  message: "Now {{ states(temp_sensor) }}."
+                  data: "{{ push_data }}"

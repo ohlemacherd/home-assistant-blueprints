@@ -1,0 +1,175 @@
+blueprint:
+  name: Night Brightness Cap (a dimmer that blasts at 4am)
+  description: >
+    Some dimmers ignore the brightness they were asked for and come on at
+    the level they last remembered - a daytime 90 percent, in a pitch-black
+    kitchen, at 4:30 in the morning. This watches the lights you name during
+    a night window and, when one has come on above a cap and stayed there
+    for a settle time, brings it down to a gentle level in small steps.
+
+
+    The lesson built in, after this guard misfired five times at a person:
+    by default it corrects ONLY a turn-on that an automation or script
+    commanded in response to something - a motion automation, a presence
+    routine - the case where a bulb raced your command and won. A hand on
+    the wall switch arrives with no automation and no user behind it, and
+    that is not a bug; it is a person choosing a bright kitchen. Every
+    earlier version tuned the threshold and the timing, and the threshold
+    was never the problem - it was picking the wrong target. One limit of
+    that test: an automation started by a time or by the sun writes with no
+    parent either, so a scheduled wake-up routine looks like the switch and
+    is left alone. You can widen the cap to every turn-on if your switch has
+    no local control or your routines run on a clock.
+
+
+    Why steps? These dimmers usually cannot fade - every change is an
+    instant jump - so the correction descends in a few small steps a second
+    apart instead of one cliff from 90 to 10. Each step only fires while the
+    light is still above it, so if something else already fixed the level
+    the ramp does nothing rather than brighten.
+
+
+    Example: light.kitchen_ceiling, 22:00 to 06:30, cap 40 percent, target
+    10 percent, 60-second settle, only when the sun is down.
+  domain: automation
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/night-brightness-cap.yaml
+  input:
+    lights:
+      name: Lights to cap
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: light
+    window_start:
+      name: Night window starts
+      default: "22:00:00"
+      selector:
+        time: {}
+    window_end:
+      name: Night window ends
+      default: "06:30:00"
+      selector:
+        time: {}
+    dark_only:
+      name: Only while the sun is down
+      description: >-
+        On (default): the window applies only while the sun is below the
+        horizon, so a late-sunrise winter morning is covered and a bright
+        June evening is not.
+      default: true
+      selector:
+        boolean: {}
+    cap_pct:
+      name: Correct when brightness is above (percent)
+      default: 40
+      selector:
+        number:
+          min: 5
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+    target_pct:
+      name: Bring it down to (percent)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+    settle_seconds:
+      name: Seconds after turn-on before judging
+      description: Gives the light's own transition, and any automation that set it, time to finish.
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 300
+          step: 5
+          unit_of_measurement: seconds
+          mode: box
+    only_automation:
+      name: Correct only turn-ons that an automation or script commanded
+      description: >-
+        On (default): a turn-on with no automation behind it - the wall
+        switch, the device's own remote, and also an automation started by a
+        time or the sun, which carries no parent - is left alone. Off: every
+        turn-on above the cap is corrected, including a hand on the switch.
+        Dashboard and app turn-ons are never corrected: a person picked that
+        level on purpose.
+      default: true
+      selector:
+        boolean: {}
+    steps:
+      name: Step the brightness down gradually
+      description: >-
+        On (default): 60, 40, 25, 15 and the target, 1.2 s apart, each only
+        while the light is still above it. Off: one jump to the target.
+      default: true
+      selector:
+        boolean: {}
+
+mode: parallel
+max: 5
+max_exceeded: silent
+
+variables:
+  dark_only: !input dark_only
+  cap_pct: !input cap_pct
+  target_pct: !input target_pct
+  only_automation: !input only_automation
+  steps: !input steps
+
+triggers:
+  - trigger: state
+    entity_id: !input lights
+    from: "off"
+    to: "on"
+    for:
+      seconds: !input settle_seconds
+
+conditions:
+  - condition: time
+    after: !input window_start
+    before: !input window_end
+  - condition: template
+    value_template: "{{ (not dark_only) or (state_attr('sun.sun', 'elevation') | float(0)) < 0 }}"
+  - condition: template
+    value_template: >-
+      {{ (state_attr(trigger.entity_id, 'brightness') | int(0)) > (cap_pct | int) * 2.55 }}
+  # A command Home Assistant sent carries a parent (the automation or
+  # script). A dashboard or app tap carries a user and is always a choice.
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state.context.user_id is none
+         and ((not only_automation) or trigger.to_state.context.parent_id is not none) }}
+
+actions:
+  - variables:
+      was_pct: "{{ ((state_attr(trigger.entity_id, 'brightness') | int(0)) / 2.55) | round(0) | int }}"
+      ladder: >-
+        {{ (([60, 40, 25, 15] | select('>', target_pct | int) | list) + [target_pct | int]) if steps else [target_pct | int] }}
+  - repeat:
+      for_each: "{{ ladder }}"
+      sequence:
+        - condition: template
+          value_template: >-
+            {{ (state_attr(trigger.entity_id, 'brightness') | int(0)) > (repeat.item * 2.55) | int }}
+        - action: light.turn_on
+          continue_on_error: true
+          target:
+            entity_id: "{{ trigger.entity_id }}"
+          data:
+            brightness_pct: "{{ repeat.item }}"
+        - delay:
+            milliseconds: 1200
+  - action: logbook.log
+    data:
+      name: Night brightness cap
+      entity_id: "{{ trigger.entity_id }}"
+      message: "brought down from {{ was_pct }}% to {{ target_pct }}%"

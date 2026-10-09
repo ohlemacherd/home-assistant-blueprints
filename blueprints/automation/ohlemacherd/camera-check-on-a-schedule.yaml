@@ -1,0 +1,299 @@
+blueprint:
+  name: Camera Check on a Schedule (push, or tick a chore)
+  description: >
+    Runs one of your AI Camera Yes/No Check scripts at a time of day, or at
+    sunrise or sunset, on the weekdays you choose, and acts on the answer: a
+    push when the camera says the thing you are watching for, and optionally
+    a to-do item ticked when it says the opposite. Silence when the camera
+    could not see. This is the half that turns a yes/no script into a
+    routine: "are the carts still by the house?" on trash night, "is a
+    package still on the porch?" half an hour before dark, "is a car still
+    in the driveway?" at bedtime, "is anything left out on the patio?" when
+    rain is expected.
+
+
+    Why a schedule and not a motion trigger? These are questions about a
+    scene that is NOT moving: a cart that was never wheeled out, a box that
+    was never brought in. Nothing happens to trigger on, so the check runs
+    when the answer matters - 20:00 the night before pickup, sunset minus 30
+    minutes - and never in a loop. One run is one AI call.
+
+
+    Why silence on "couldn't tell"? A dark or blurred frame is not evidence
+    that a chore was skipped. A false nag costs more than a missed one, so
+    an unusable check does nothing unless you ask to be told.
+
+
+    Needs a script made from this repo's AI Camera Yes/No Check (import that
+    first). The message may use {{ reasoning }} and {{ scene }}: the model's
+    one-line explanation and its description of the frame. Example:
+    script.carts_still_by_the_house, trash night, 20:00, push when Yes,
+    message "The camera still sees the carts up by the house:
+    {{ reasoning }}", and tick "Bins out" on the household list when the
+    answer is No.
+  domain: automation
+  homeassistant:
+    # 2025.8: the AI Camera Yes/No Check this runs needs AI Task image
+    # attachments.
+    min_version: 2025.8.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/automation/ohlemacherd/camera-check-on-a-schedule.yaml
+  input:
+    check_script:
+      name: Camera check script
+      description: >-
+        A script created from the AI Camera Yes/No Check blueprint, one
+        question per script. Only scripts are listed; pick the one for this
+        question.
+      selector:
+        entity:
+          filter:
+            - domain: script
+    when:
+      name: When to check
+      default: time
+      selector:
+        select:
+          mode: list
+          options:
+            - label: At a time of day
+              value: time
+            - label: At sunset, plus or minus the offset
+              value: sunset
+            - label: At sunrise, plus or minus the offset
+              value: sunrise
+    at_time:
+      name: Time of day
+      description: Used when "At a time of day" is chosen.
+      default: "20:00:00"
+      selector:
+        time: {}
+    sun_offset:
+      name: Sunrise / sunset offset
+      description: >-
+        Used with sunrise or sunset. HH:MM:SS, with a leading minus for
+        before: -00:30:00 is half an hour before. Before sunset there is
+        still light to judge by and time to walk outside.
+      default: "-00:30:00"
+      selector:
+        text: {}
+    weekdays:
+      name: Weekdays
+      default: [mon, tue, wed, thu, fri, sat, sun]
+      selector:
+        select:
+          multiple: true
+          mode: list
+          options:
+            - label: Monday
+              value: mon
+            - label: Tuesday
+              value: tue
+            - label: Wednesday
+              value: wed
+            - label: Thursday
+              value: thu
+            - label: Friday
+              value: fri
+            - label: Saturday
+              value: sat
+            - label: Sunday
+              value: sun
+    gate_entity:
+      name: Only when this entity... (optional)
+      description: >-
+        An entity that has to be in the state below for the check to run - a
+        "rain expected today" sensor for the patio, a Toggle you flip on a
+        holiday-shifted trash week. Leave empty to run on every chosen day.
+      default: ""
+      selector:
+        entity: {}
+    gate_state:
+      name: ...is in this state
+      description: Exact match. Ignored when the entity above is empty.
+      default: "on"
+      selector:
+        text: {}
+    act_on:
+      name: Push when the camera says
+      description: >-
+        "Yes" to be told when the thing is there (a package, a car, carts
+        still by the house). "No" to be told when it is missing.
+      default: "yes"
+      selector:
+        select:
+          mode: list
+          options:
+            - label: "Yes"
+              value: "yes"
+            - label: "No"
+              value: "no"
+    notify_service:
+      name: Notify service
+      description: >-
+        Where the push goes. notify.persistent_notification (the default) is
+        built in and shows under Settings -> Notifications; use
+        notify.mobile_app_<your phone> to be interrupted.
+      default: notify.persistent_notification
+      selector:
+        text: {}
+    title:
+      name: Push title
+      default: Camera check
+      selector:
+        text: {}
+    message:
+      name: Push message
+      description: >-
+        May use {{ reasoning }}, the model's one-line explanation, and
+        {{ scene }}, its one-sentence description of the frame.
+      default: "{{ reasoning }}"
+      selector:
+        text:
+          multiline: true
+    camera:
+      name: Camera for the snapshot (optional)
+      description: >-
+        Attach this camera's current picture to the push (Companion app
+        only; other notify services ignore it). Leave empty for text only.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: camera
+    todo_list:
+      name: To-do list to tick (optional)
+      description: >-
+        When the camera gives the OTHER answer - the good one - mark the item
+        below completed on this list. Leave empty to skip.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: todo
+    todo_item:
+      name: To-do item to tick
+      description: >-
+        The item's text as it appears on the list, for example "Bins out".
+        The first OPEN item with that text is marked completed; completed
+        copies from earlier weeks are left alone. Nothing happens if no open
+        item has that text.
+      default: ""
+      selector:
+        text: {}
+    tell_unusable:
+      name: Tell me when the camera couldn't see
+      description: >-
+        Off (default): an unusable frame does nothing. On: a short note goes
+        to the notify service saying why, so a camera that has gone dark
+        gets noticed.
+      default: false
+      selector:
+        boolean: {}
+
+mode: single
+max_exceeded: silent
+
+variables:
+  check_script: !input check_script
+  when: !input when
+  gate_entity: !input gate_entity
+  gate_state: !input gate_state
+  act_on: !input act_on
+  notify_service: !input notify_service
+  camera: !input camera
+  todo_list: !input todo_list
+  todo_item: !input todo_item
+  tell_unusable: !input tell_unusable
+
+triggers:
+  - trigger: time
+    at: !input at_time
+    id: time
+  - trigger: sun
+    event: sunset
+    offset: !input sun_offset
+    id: sunset
+  - trigger: sun
+    event: sunrise
+    offset: !input sun_offset
+    id: sunrise
+
+conditions:
+  - condition: template
+    value_template: "{{ trigger.id == when }}"
+  - condition: time
+    weekday: !input weekdays
+  # | string: a numeric state arrives as a number, and is_state() never
+  # matches a number against a string.
+  - condition: template
+    value_template: "{{ gate_entity == '' or is_state(gate_entity, gate_state | string) }}"
+
+actions:
+  # One AI call. The script returns outcome (yes / no / unusable), reasoning
+  # and scene; a failed call leaves `check` undefined, which reads as unusable.
+  - action: "{{ check_script }}"
+    continue_on_error: true
+    response_variable: check
+  - variables:
+      outcome: "{{ check.outcome if (check is defined and check.outcome is defined) else 'unusable' }}"
+      reasoning: "{{ (check.reasoning | default('', true) | string) if check is defined else '' }}"
+      scene: "{{ (check.scene | default('', true) | string) if check is defined else '' }}"
+      other: "{{ 'no' if act_on == 'yes' else 'yes' }}"
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ outcome == act_on }}"
+        sequence:
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: !input title
+              message: !input message
+              data: "{{ {'image': '/api/camera_proxy/' ~ camera} if camera != '' else {} }}"
+      - conditions:
+          - condition: template
+            value_template: "{{ outcome == other and todo_list != '' and (todo_item | trim) != '' }}"
+        sequence:
+          # todo.update_item by text takes the FIRST item with that text,
+          # completed or not, so a weekly chore with old completed copies on
+          # the list would tick the wrong one. Find the open one and update
+          # it by uid.
+          - action: todo.get_items
+            continue_on_error: true
+            target:
+              entity_id: "{{ todo_list }}"
+            data:
+              status: needs_action
+            response_variable: open_items
+          - variables:
+              open_uid: >-
+                {% set want = todo_item | trim | lower %}
+                {% set ns = namespace(uid='') %}
+                {% for it in ((open_items[todo_list]['items'] if (open_items is defined and todo_list in open_items) else [])) %}
+                  {% if ns.uid == '' and (it.summary | default('', true) | string | trim | lower) == want %}
+                    {% set ns.uid = it.uid | default('', true) %}
+                  {% endif %}
+                {% endfor %}
+                {{ ns.uid }}
+          - if:
+              - condition: template
+                value_template: "{{ open_uid != '' }}"
+            then:
+              - action: todo.update_item
+                continue_on_error: true
+                target:
+                  entity_id: "{{ todo_list }}"
+                data:
+                  item: "{{ open_uid }}"
+                  status: completed
+      - conditions:
+          - condition: template
+            value_template: "{{ outcome == 'unusable' and tell_unusable }}"
+        sequence:
+          - action: "{{ notify_service }}"
+            continue_on_error: true
+            data:
+              title: !input title
+              message: "Couldn't tell: {{ reasoning if reasoning else 'the camera could not see' }}"
+    # No default: the other answer with no to-do to tick, or an unusable
+    # frame you did not ask to hear about, is silence.

@@ -1,0 +1,172 @@
+blueprint:
+  name: Voice Assistant Tool - Open an App on the TV
+  description: >
+    "Put on Netflix", "open Disney+", "search YouTube for excavator
+    videos": gives an AI voice assistant one tool that turns the TV on and
+    opens a streaming app on it, and for YouTube can open a search. Works
+    with the Android TV Remote integration (Google TV, Chromecast with Google
+    TV, Nvidia Shield, most Android TVs): its remote entity accepts an app
+    link or deep link as the "activity" to turn on. You list the apps and
+    their links once. The model reads the names from the field's
+    description and passes one back. Returns at once; the person picks the
+    show with the remote.
+
+
+    Known limits: only apps that open from a link, and only on one TV per
+    instance of this blueprint. Live TV channels inside an app (a sports
+    network inside a TV-streaming app) cannot be chosen from here; the tool
+    opens the app and tells the assistant to name the channel. A link
+    opens the app's own page for it, not a specific title, unless the
+    link itself is a deep link to one. YouTube Kids is left out of the
+    defaults on purpose: on some TVs it is its own app with its own link, on
+    others a profile inside the YouTube app, and a search sent to the wrong
+    one opens in front of a child. Add it yourself once you know which your
+    TV has.
+
+
+    ONE STEP THAT MATTERS. When you save the script, the save dialog asks
+    for a name and a description. What you type in Description is what the
+    model reads; the blueprint's own text does not reach it, and an empty
+    box tells the model nothing. Click "Add description" and paste: "Turn on
+    the TV and open one streaming app on it. Use for 'put on Netflix', 'open
+    YouTube', 'I want to watch something on Disney+'. For YouTube you may
+    also pass search words and the results page opens; for other apps leave
+    search empty and tell the person to pick the title with the remote. If
+    the app asked for is not one the tool knows, say so plainly." The app
+    field's description (an input below) lists the apps, and it always
+    reaches the model.
+  domain: script
+  homeassistant:
+    min_version: 2024.10.0
+  source_url: https://github.com/ohlemacherd/home-assistant-blueprints/blob/main/blueprints/script/ohlemacherd/voice-tv-app-tool.yaml
+  input:
+    remote:
+      name: TV remote entity
+      description: The remote entity from the Android TV Remote integration for this TV.
+      selector:
+        entity:
+          filter:
+            - domain: remote
+    tv_name:
+      name: What to call the TV
+      description: Used in the answer the assistant reads back, for example "the living room TV".
+      default: the living room TV
+      selector:
+        text: {}
+    apps:
+      name: Apps and their links
+      description: >-
+        One per line, "Name = link". The link is what the remote is told to
+        open. These defaults work on Google TV; check an app's own deep-link
+        scheme if one does not.
+      default: |-
+        Netflix = https://www.netflix.com/title
+        YouTube = https://www.youtube.com
+        Disney+ = https://www.disneyplus.com
+        Prime Video = https://app.primevideo.com
+        Max = https://play.max.com
+      selector:
+        text:
+          multiline: true
+    app_names:
+      name: The app field's description (what the model reads)
+      description: >-
+        Shown to the model as the description of the "app" field. List the
+        same names as above, spelled the same, so it passes one back exactly.
+      default: >-
+        Which app to open. One of: Netflix, YouTube, Disney+, Prime Video,
+        Max. Use the exact name.
+      selector:
+        text:
+          multiline: true
+    search_apps:
+      name: Apps that can take a search
+      description: >-
+        Comma-separated names from the list above that open a search results
+        page when given words. YouTube does; most others do not.
+      default: YouTube
+      selector:
+        text: {}
+    search_url:
+      name: Search link prefix
+      description: The search words are appended to this, URL-encoded.
+      default: https://www.youtube.com/results?search_query=
+      selector:
+        text: {}
+
+mode: single
+# Reaches the model only for a script written in YAML; a script saved in the
+# UI carries its own description, which replaces this one (see the blueprint
+# description). The field descriptions below always reach the model.
+description: >-
+  Turn on the TV and open one streaming app on it. Use for "put on Netflix",
+  "open YouTube", "I want to watch something on Disney+". For YouTube you may
+  also pass search words; for other apps leave search empty and tell the
+  person to pick the title with the remote. If the app is not one the tool
+  knows, say so plainly.
+fields:
+  app:
+    name: App
+    description: !input app_names
+    example: Netflix
+    required: true
+    selector:
+      text: {}
+  search:
+    name: Search words
+    description: Words to search for, only for the apps that can search (YouTube). Leave empty otherwise.
+    example: excavator videos for kids
+    selector:
+      text: {}
+
+variables:
+  remote: !input remote
+  tv_name: !input tv_name
+  apps: !input apps
+  search_apps: !input search_apps
+  search_url: !input search_url
+
+sequence:
+  - variables:
+      wanted: "{{ app | default('', true) | string | trim | lower }}"
+      q: "{{ search | default('', true) | string | trim }}"
+      # The "Name = link" list, matched on the name without caring about case.
+      found: >-
+        {%- set ns = namespace(name='', link='') -%}
+        {%- for line in (apps | string).split('\n') -%}
+          {%- set parts = line.split('=', 1) -%}
+          {%- if parts | count == 2 and (parts[0] | trim | lower) == wanted -%}
+            {%- set ns.name = parts[0] | trim -%}
+            {%- set ns.link = parts[1] | trim -%}
+          {%- endif -%}
+        {%- endfor -%}
+        {{ {'name': ns.name, 'link': ns.link} }}
+      can_search: "{{ wanted in ((search_apps | string).split(',') | map('trim') | map('lower') | list) }}"
+  - if:
+      - condition: template
+        value_template: "{{ found.link == '' }}"
+    then:
+      - variables:
+          result:
+            opened: none
+            error: "'{{ app | default('', true) }}' is not one of the apps this TV knows. Say so plainly and name the ones that are available."
+      - stop: Unknown app
+        response_variable: result
+  # No continue_on_error: a TV that cannot be reached must fail the call, so
+  # the assistant says so instead of reporting the app as opened.
+  - action: remote.turn_on
+    target:
+      entity_id: "{{ remote }}"
+    data:
+      activity: "{{ (search_url ~ (q | urlencode)) if (can_search and q != '') else found.link }}"
+  - variables:
+      result:
+        opened: "{{ found.name }}"
+        tv: "{{ tv_name }}"
+        searched: "{{ q if (can_search and q != '') else '' }}"
+        note: >-
+          {{ 'Search results are opening; the person picks a video with the remote.'
+             if (can_search and q != '')
+             else 'The app is opening; the person picks the show or channel with the remote.' }}
+  - stop: App opened
+    response_variable: result
