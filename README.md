@@ -327,8 +327,8 @@ design. The house quietly doing what someone just asked for is the whole
 feature.
 
 The incident it came from, to the second: a temperature-driven fan automation
-re-evaluated every few minutes. Someone turned the fan to full at 00:39. At
-00:44 the automation found the room at 64 degrees, fell through to its default
+re-evaluated every few minutes. Someone turned the fan to full after midnight. Five
+minutes later the automation found the room at 64 degrees, fell through to its default
 branch and wrote 50 percent over them. Five minutes. The defect was not a
 threshold. There was no concept of a manual override anywhere in the stack,
 so the life expectancy of any human choice was one sensor sample.

@@ -12,7 +12,7 @@ blueprint:
 
 
     Why this exists: a temperature-driven fan automation re-evaluates every
-    few minutes. Someone turns the fan to full at 00:39. At 00:44 the
+    few minutes. Someone turns the fan to full after midnight. Five minutes later the
     automation finds the room at 64 degrees, falls through to its default
     branch and writes 50 percent over them. Five minutes. The defect was not
     a threshold. There was no concept of a manual override anywhere in the
